@@ -7,30 +7,32 @@ import carla
 
 
 class PlanningListener:
-    def __init__(self, carla_world):
+    def __init__(self, carla_world,logger):
         self.world = carla_world
-        self.running = False
         self.plan_points = []
+        self.logger = logger
         self.lock = threading.Lock()  # for plan_points
 
+        self.stop_signal = False
+        self.main_thread = None
+
     def start(self):
-        self.running = True
-        self.thread = threading.Thread(target=self.run)
-        self.thread.start()
+        self.main_thread = threading.Thread(target=self.run)
+        self.main_thread.start()
 
     def run(self):
         cyber.init()
         self.node = cyber.Node("planning_listener")
         self.node.create_reader(
             "/apollo/planning", planning_pb2.ADCTrajectory, self.planning_callback)
-        while self.running:
+        while not self.stop_signal:
             time.sleep(0.1)
         print("cyber shutting down")
         cyber.shutdown()
 
     def stop(self):
-        self.running = False
-        self.thread.join()
+        self.stop_signal = True
+        self.main_thread.join()
 
     def planning_callback(self, planning_data: planning_pb2.ADCTrajectory):
         new_plan_points = []
