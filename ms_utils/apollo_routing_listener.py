@@ -22,8 +22,8 @@ class ApolloRoutingListener:
         self.main_thread = None
 
         self.routing = []
-        self.routing_wp = []
-        self.recv_time = time.time()
+        self.routing_wps = []
+        self.recv_time = None
 
         self.node = None
 
@@ -56,36 +56,36 @@ class ApolloRoutingListener:
         self.routing = []
         first_segment = routing_response.road[0].passage[0].segment[0]
         self.routing.append(f'{first_segment.id}_{first_segment.end_s}')
-        self.routing_wp = []
+        self.routing_wps = []
         first_wp_t = self.LaneSegment_to_wp_touple(first_segment)
-        self.routing_wp.append(first_wp_t[0])
+        self.routing_wps.append(first_wp_t[0])
         for road in routing_response.road:
             for segment in road.passage[0].segment:
                 lane_wp_s, lane_wp_e = self.LaneSegment_to_wp_touple(
                     segment)
                 self.routing.append(f'{segment.id}_{segment.end_s}')
-                self.routing_wp.append(lane_wp_e)
+                self.routing_wps.append(lane_wp_e)
 
         if self.debug:
             if self.logger != None:
-                self.logger.info(f"waypoints:{self.routing_wp}")
+                self.logger.info(f"waypoints:{self.routing_wps}")
             self.draw_routing_wps()
 
     def draw_routing_wps(self):
-        if self.routing_wp[0] == None and self.ego_vehicle != None:
-            self.routing_wp[0] = self.map.get_waypoint(
+        if self.routing_wps[0] == None and self.ego_vehicle != None:
+            self.routing_wps[0] = self.map.get_waypoint(
                 self.ego_vehicle.get_transform().location)
 
         drawing_wps = []
 
-        if len(self.routing_wp) <= 2:
-            drawing_wps = self.routing_wp
+        if len(self.routing_wps) <= 2:
+            drawing_wps = self.routing_wps
         else:
-            if self.routing_wp[0] != None:
-                drawing_wps += self.routing_wp[0].next_until_lane_end(10)
+            if self.routing_wps[0] != None:
+                drawing_wps += self.routing_wps[0].next_until_lane_end(10)
 
-            for i in range(2, len(self.routing_wp)):
-                prv_wps = self.routing_wp[i].previous_until_lane_start(10)
+            for i in range(2, len(self.routing_wps)):
+                prv_wps = self.routing_wps[i].previous_until_lane_start(10)
                 drawing_wps += prv_wps
 
         for wpt in drawing_wps:
