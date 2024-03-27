@@ -57,19 +57,14 @@ class ApolloRoutingListener:
         with self.lock:
             self.routing = []
             self.routing_wps = []
-            first_segment = routing_response.road[0].passage[0].segment[0]
-            self.routing.append(f'{first_segment.id}_{first_segment.end_s}')
-            first_wp_t = self.LaneSegment_to_wp_touple(first_segment)
-            self.routing_wps.append(first_wp_t[0])
-            for road in routing_response.road:
+            for i, road in enumerate(routing_response.road):
                 if road == None:
                     continue
-                for segment in road.passage[0].segment:
+                for j, segment in enumerate(road.passage[0].segment):
                     if segment == None:
                         continue
                     lane_wp_s, lane_wp_e = self.LaneSegment_to_wp_touple(
                         segment)
-                    
                     ''' debug
                     time.sleep(1)
                     if lane_wp_s != None:
@@ -87,32 +82,51 @@ class ApolloRoutingListener:
                                      f"{segment.id} end",
                                      life_time=10)
                     '''
-                    
                     self.routing.append(
-                        f'{segment.id}_{segment.start_s}_{segment.end_s}')
-                    self.routing_wps.append(lane_wp_e)
-
+                        f'{segment.id}_{int(segment.start_s)}_{int(segment.end_s)}')
+                    self.routing_wps.append([lane_wp_s, lane_wp_e])
+            # print(self.routing)
+            # print(self.routing_wps)
         if self.debug:
             if self.logger != None:
                 self.logger.info(f"waypoints:{self.routing_wps}")
             self.draw_routing_wps()
 
     def draw_routing_wps(self):
-        if self.routing_wps[0] == None and self.ego_vehicle != None:
-            self.routing_wps[0] = self.map.get_waypoint(
-                self.ego_vehicle.get_transform().location)
-
         drawing_wps = []
 
         if len(self.routing_wps) <= 2:
             drawing_wps = self.routing_wps
         else:
-            if self.routing_wps[0] != None:
-                drawing_wps += self.routing_wps[0].next_until_lane_end(5)
-
-            for i in range(2, len(self.routing_wps)):
-                prv_wps = self.routing_wps[i].previous_until_lane_start(5)
-                drawing_wps += prv_wps
+            for i,wp in enumerate(self.routing_wps[:-1]):
+                if self.debug: 
+                    self.world.debug.draw_point(wp[0].transform.location +
+                                carla.Location(0, 0, 1), life_time=20)
+                    self.world.debug.draw_string(wp[0].transform.location,
+                                f"wp #{i} is_junction:{wp[0].is_junction}",
+                                life_time=20)
+                try:
+                    next_wps = wp[0].next_until_lane_end(5)
+                    drawing_wps += next_wps
+                except RuntimeError as e:               
+                    try:
+                        prev_wps = wp[1].previous_until_lane_start(5)
+                        prev_wps.reverse()
+                        drawing_wps += prev_wps
+                    except RuntimeError as e:                            
+                        if self.debug and self.logger != None: 
+                            self.logger.warning(f'wp #{i}: fail {e}')  
+                        drawing_wps.append(wp[0])
+                        continue
+            try:
+                final_seg = self.routing_wps[-1][1].previous_until_lane_start(5)
+                final_seg.reverse()
+                drawing_wps += final_seg
+            except RuntimeError as e:
+                if self.debug and self.logger != None: 
+                    self.logger.warning(f'wp #{-1}: previous_until_lane_start {e}')
+                drawing_wps.append(self.routing_wps[-1][1])
+                
 
         for wpt in drawing_wps:
             wpt_t = wpt.transform
@@ -120,7 +134,7 @@ class ApolloRoutingListener:
             angle = math.radians(wpt_t.rotation.yaw)
             end = begin + carla.Location(x=math.cos(angle), y=math.sin(angle))
             self.world.debug.draw_arrow(begin, end, color=carla.Color(
-                192, 255, 62), arrow_size=0.3, life_time=60)
+                192, 255, 62), arrow_size=0.3, life_time=30)
 
     def LaneSegment_to_wp_touple(self, lane_segment):
         # return the start waypoint and the end waypoint
@@ -132,18 +146,22 @@ class ApolloRoutingListener:
         wp_s = self.map.get_waypoint_xodr(int(road_id[1]),
                                           int(road_id[4]),
                                           float(lane_segment.start_s))
-
-        wp_e = self.map.get_waypoint_xodr(int(road_id[1]),
-                                          int(road_id[4]),
-                                          float(lane_segment.end_s))
+        i = 0
+        wp_e = None
+        while wp_e == None:
+            wp_e = self.map.get_waypoint_xodr(int(road_id[1]),
+                                              int(road_id[4]),
+                                              float(int(lane_segment.end_s) - i))
+            i += 1
         return (wp_s, wp_e)
 
 
-if __name__ == '__main__':
+if __name__ == '__main__':    
+    from loguru import logger
     client = carla.Client('172.17.0.1', 5000)
     world = client.get_world()
 
-    routing_listener = ApolloRoutingListener(world, debug=True)
+    routing_listener = ApolloRoutingListener(world, debug=True, logger=logger)
     routing_listener.start()
 
     def signal_handler(sig, frame):
