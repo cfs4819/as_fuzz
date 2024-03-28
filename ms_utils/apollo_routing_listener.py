@@ -99,6 +99,8 @@ class ApolloRoutingListener:
             drawing_wps = self.routing_wps
         else:
             for i,wp in enumerate(self.routing_wps[:-1]):
+                if wp[0] == None or wp[1] == None:
+                    continue
                 if self.debug: 
                     self.world.debug.draw_point(wp[0].transform.location +
                                 carla.Location(0, 0, 1), life_time=20)
