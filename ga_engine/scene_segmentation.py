@@ -11,13 +11,14 @@ from MS_fuzz.ms_utils.apollo_routing_listener import ApolloRoutingListener
 class Segment(object):
     def __init__(self, location: carla.Location,
                  rotation: carla.Rotation,
-                 length: float, width: float):
+                 length: float, width: float,
+                 is_junction=False):
         self.location = location
         self.rotation = rotation
         self.length = length
         self.width = width
 
-        self.is_junction = False
+        self.is_junction = is_junction
 
         self.bbox: carla.BoundingBox = carla.BoundingBox(
             location, carla.Vector3D(self.length/2, self.width/2, 2))
@@ -33,14 +34,14 @@ class SceneSegment(object):
         self.logger = logger
         self.debug = debug
 
-        # self.routing_listener = ApolloRoutingListener(self.carla_world,
-        #                                               ego_vehicle=self.ego_vehicle,
-        #                                               logger=self.logger,
-        #                                               debug=self.debug)
         self.routing_listener = ApolloRoutingListener(self.carla_world,
                                                       ego_vehicle=self.ego_vehicle,
                                                       logger=self.logger,
                                                       debug=self.debug)
+        # self.routing_listener = ApolloRoutingListener(self.carla_world,
+        #                                               ego_vehicle=self.ego_vehicle,
+        #                                               logger=self.logger,
+        #                                               debug=False)
 
         self.segments = []
 
@@ -58,13 +59,20 @@ class SceneSegment(object):
     def get_next_seg():
         pass
 
-    def wait_for_route(self, req_time, interval=-2):
+    def wait_for_route(self, req_time, interval=-2, wait_from_req_time=False):
         self.stop_listening = False
-        while self.routing_listener.recv_time == None or \
-                (self.routing_listener.recv_time - req_time) <= interval:
-            if self.stop_listening == True:
-                break
-            time.sleep(0.1)
+        if wait_from_req_time :
+            while self.routing_listener.req_time == None or \
+                (self.routing_listener.req_time - req_time) <= interval:
+                if self.stop_listening == True:
+                    break
+                time.sleep(0.1)
+        else: 
+            while self.routing_listener.recv_time == None or \
+                    (self.routing_listener.recv_time - req_time) <= interval:
+                if self.stop_listening == True:
+                    break
+                time.sleep(0.1)
 
     def get_seg_from_junction_wp(self, wp: carla.Waypoint, length: float, width: float):
         junction = wp.get_junction()
@@ -99,7 +107,7 @@ class SceneSegment(object):
         wp = wp_s
         max = int(wp_s.transform.location.distance(
             wp_e.transform.location)/length) + 3
-        # Ensure accurate division even in curves
+        # Ensures precise division even on winding roads
         while wp.transform.location.distance(wp_e.transform.location) > length:
             segs.append(Segment(wp.transform.location,
                                 wp.transform.rotation, length, width))
@@ -114,9 +122,18 @@ class SceneSegment(object):
                                length: float, width: float):
         segs = []
         among_wps = []
+        start_wp = wp_touple[0]
+        if self.segments != [] and self.segments[-1] != None:
+            last_seg = self.segments[-1]
+            last_trans = carla.Transform(
+                carla.Location(0, 0, 0), carla.Rotation(0, 0, 0))
+            # print(last_seg.bbox.contains(start_wp.transform.location, last_trans))
+            if last_seg.bbox.contains(start_wp.transform.location, last_trans):
+                start_wp = start_wp.next(length/2)[0]  # forward half a length
+            pass
         try:
-            next_wps = wp_touple[0].next_until_lane_end(length)
-            among_wps = [wp_touple[0]] + next_wps[:-1]
+            next_wps = start_wp.next_until_lane_end(length)
+            among_wps = [start_wp] + next_wps[:-1]
         except RuntimeError as e:
             try:
                 prev_wps = wp_touple[1].previous_until_lane_start(length)
@@ -125,33 +142,42 @@ class SceneSegment(object):
             except RuntimeError as e:
                 if self.debug and self.logger != None:
                     self.logger.warning(f'{wp_touple}: fail {e}')
-                among_wps.append(wp_touple[0])
+                among_wps.append(start_wp)
         for among_wp in among_wps:
             segs.append(Segment(among_wp.transform.location,
                                 among_wp.transform.rotation, length, width))
         return segs
 
     def get_segments(self, length: float, width: float):
-        segs = []
+        self.segments = []
         with self.routing_listener.lock:
             routing_wps = self.routing_listener.routing_wps
-        pdb.set_trace()
+        # pdb.set_trace()
+        if routing_wps[0][0] == None:
+            # we assume that the vehicle is stopped at the beginning of its planning road
+            if self.ego_vehicle != None:
+                start_loc = self.ego_vehicle.get_transform().location
+                routing_wps[0][0] = self.carla_world.get_map(
+                ).get_waypoint(start_loc)
+
         for i, route_wp in enumerate(routing_wps):
             if route_wp[1].is_junction:
-                segs += self.get_seg_from_junction_wp(route_wp[0],
-                                                      length, width)
+                self.segments += self.get_seg_from_junction_wp(route_wp[0],
+                                                               length, width)
                 continue
+
             if i == len(routing_wps) - 1:
                 # handle the final segment
-                segs += self.get_seg_between_two_wp(route_wp[0],
-                                                    route_wp[1],
-                                                    length, width)
+                self.segments += self.get_seg_between_two_wp(route_wp[0],
+                                                             route_wp[1],
+                                                             length, width)
                 continue
-            segs += self.get_seg_from_full_road(route_wp, length, width)
+            self.segments += self.get_seg_from_full_road(
+                route_wp, length, width)
 
         if self.debug:
             carla_db = self.carla_world.debug
-            for i, seg in enumerate(segs):
+            for i, seg in enumerate(self.segments):
                 if seg.bbox == None:
                     continue
                 carla_db.draw_string(seg.location,
@@ -160,8 +186,6 @@ class SceneSegment(object):
                                      life_time=60)
                 carla_db.draw_box(seg.bbox, seg.rotation, thickness=0.1,
                                   color=carla.Color(0, 191, 255), life_time=60)
-
-        return segs
 
 
 if __name__ == '__main__':
