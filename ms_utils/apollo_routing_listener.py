@@ -17,7 +17,7 @@ class ApolloRoutingListener:
         self.logger = logger
         self.debug = debug
 
-        self.runing = False
+        self.running = False
         self.stop_signal = False
         self.main_thread = None
         self.lock = threading.Lock()  # for plan_points
@@ -25,35 +25,44 @@ class ApolloRoutingListener:
         self.routing = []
         self.routing_wps = []
         self.recv_time = None
+        self.req_time = None
 
         self.node = None
+        self.subscriber = None
 
     def start(self):
         self.main_thread = threading.Thread(target=self.run)
         self.main_thread.start()
 
     def run(self):
-        cyber.init()
+        # we don't init cyber here
+        # cyber.init()
         self.node = cyber.Node("routing_listener_node")
-        self.node.create_reader(
+        self.subscriber = self.node.create_reader(
             "/apollo/routing_response", RoutingResponse, self.routing_callback)
-        self.runing = True
+        self.running = True
         self.stop_signal = False
         while not self.stop_signal:
             time.sleep(0.1)
         if self.logger != None:
             self.logger.info("routing_listener_node shutting down")
-        cyber.shutdown()
+        
+        del self.subscriber
+        del self.node
+
+        # we don't stop cyber here
+        # cyber.shutdown() 
 
     def stop(self):
         self.stop_signal = True
         self.main_thread.join()
-        self.runing = False
+        self.running = False
 
     def routing_callback(self, routing_response):
         if self.debug and self.logger != None:
             self.logger.info(f"Received routing response at {time.time()}")
         self.recv_time = routing_response.header.timestamp_sec
+        self.req_time = routing_response.routing_request.header.timestamp_sec
         with self.lock:
             self.routing = []
             self.routing_wps = []
@@ -163,11 +172,14 @@ if __name__ == '__main__':
     client = carla.Client('172.17.0.1', 5000)
     world = client.get_world()
 
+    cyber.init()
+
     routing_listener = ApolloRoutingListener(world, debug=True, logger=logger)
     routing_listener.start()
 
     def signal_handler(sig, frame):
         routing_listener.stop()
+        cyber.shutdown()
         exit()
 
     signal.signal(signal.SIGINT, signal_handler)
