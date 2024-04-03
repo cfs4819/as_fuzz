@@ -4,6 +4,7 @@ import threading
 import numpy as np
 import carla
 import time
+from typing import List
 
 import pdb
 
@@ -14,72 +15,74 @@ from MS_fuzz.ga_engine.gene import *
 
 from agents.navigation.behavior_agent import BehaviorAgent
 
-# class NpcBase(object):
-#     def __init__(self,
-#                  start_loc,
-#                  end_loc,
-#                  blueprint: carla.ActorBlueprint,
-#                  start_time):
 
-#         self.start_loc: carla.Transform = start_loc
-#         self.end_loc: carla.Transform = end_loc
-#         self.blueprint: carla.ActorBlueprint = blueprint
-#         self.waypoints = []
-#         self.start_time = start_time
+class NpcBase(object):
+    def __init__(self,
+                 start_loc,
+                 end_loc,
+                 blueprint: carla.ActorBlueprint,
+                 start_time):
 
-#         self.is_running = False
-#         self.reached_destination = False
-#         self.control_thread: threading.Thread = None
-#         self.close_event: threading.Event = None
+        self.start_loc: carla.Transform = start_loc
+        self.end_loc: carla.Transform = end_loc
+        self.blueprint: carla.ActorBlueprint = blueprint
+        self.waypoints = []
+        self.start_time = start_time
+
+        self.is_running = False
+        self.reached_destination = False
+        self.control_thread: threading.Thread = None
+        self.close_event: threading.Event = None
 
 
-# class NpcVehicle(NpcBase):
-#     '''
-#         choose your blueprints by random.choice(Scenario.vehicle_blueprint)
-#     '''
+class NpcVehicle(NpcBase):
+    '''
+        choose your blueprints by random.choice(Scenario.vehicle_blueprint)
+    '''
 
-#     def __init__(self,
-#                  start_loc: carla.Transform,
-#                  end_loc: carla.Transform,
-#                  blueprint: carla.ActorBlueprint,
-#                  start_time,
-#                  behavior_type: int,
-#                  agent_type: str,
-#                  start_speed: float = 0.0,
-#                  vehicle_id=None):
-#         super(NpcVehicle, self).__init__(
-#             start_loc=start_loc,
-#             end_loc=end_loc,
-#             blueprint=blueprint,
-#             start_time=start_time
-#         )
-#         self.behavior_type: int = behavior_type  # 0: driving, 1: starting, 2: parked
-#         self.agent_type: str = agent_type
-#         self.agent: BehaviorAgent = None
-#         self.vehicle = None  # the actor object
-#         self.vehicle_id: str = vehicle_id
-#         self.start_speed: float = start_speed
+    def __init__(self,
+                 start_loc: carla.Transform,
+                 end_loc: carla.Transform,
+                 blueprint: carla.ActorBlueprint,
+                 start_time,
+                 behavior_type: int,
+                 agent_type: str,
+                 start_speed: float = 0.0,
+                 vehicle_id=None):
+        super(NpcVehicle, self).__init__(
+            start_loc=start_loc,
+            end_loc=end_loc,
+            blueprint=blueprint,
+            start_time=start_time
+        )
+        self.behavior_type: int = behavior_type  # 0: driving, 1: starting, 2: parked
+        self.agent_type: str = agent_type
+        self.agent: BehaviorAgent = None
+        self.vehicle = None  # the actor object
+        self.vehicle_id: str = vehicle_id
+        self.start_speed: float = start_speed
 
-# class NpcWalker(NpcBase):
-#     def __init__(self,
-#                  start_loc: carla.Transform,
-#                  end_loc: carla.Transform,
-#                  blueprint: carla.ActorBlueprint,
-#                  start_time,
-#                  max_speed: float,
-#                  behavior_type: int = 0,
-#                  walker_id=None):
-#         super(NpcWalker, self).__init__(
-#             start_loc=start_loc,
-#             end_loc=end_loc,
-#             blueprint=blueprint,
-#             start_time=start_time
-#         )
-#         self.walker = None  # the actor object
-#         self.max_speed = max_speed
-#         self.behavior_type: int = behavior_type  # 0: walking, 1: stoped
-#         self.ai_controller: carla.WalkerAIController = None
-#         self.walker_id: str = walker_id
+
+class NpcWalker(NpcBase):
+    def __init__(self,
+                 start_loc: carla.Transform,
+                 end_loc: carla.Transform,
+                 blueprint: carla.ActorBlueprint,
+                 start_time,
+                 max_speed: float,
+                 behavior_type: int = 0,
+                 walker_id=None):
+        super(NpcWalker, self).__init__(
+            start_loc=start_loc,
+            end_loc=end_loc,
+            blueprint=blueprint,
+            start_time=start_time
+        )
+        self.walker = None  # the actor object
+        self.max_speed = max_speed
+        self.behavior_type: int = behavior_type  # 0: walking, 1: stoped
+        self.ai_controller: carla.WalkerAIController = None
+        self.walker_id: str = walker_id
 
 
 class LocalScenario(object):
@@ -116,8 +119,14 @@ class LocalScenario(object):
         self.environment = None
 
         self.world_blueprint: carla.BlueprintLibrary = None
-        self.vehicle_blueprint: carla.BlueprintLibrary = None
+        self.vehicle_blueprint: List[carla.BlueprintLibrary] = None
         self.walker_blueprint: carla.BlueprintLibrary = None
+
+        self.vehicle_car_bps: List[carla.BlueprintLibrary] = None
+        self.vehicle_truck_bps: List[carla.BlueprintLibrary] = None
+        self.vehicle_van_bps: List[carla.BlueprintLibrary] = None
+        self.vehicle_motorcycle_bps: List[carla.BlueprintLibrary] = None
+        self.vehicle_bycicle_bps: List[carla.BlueprintLibrary] = None
 
         self.refresh_blueprint(self.carla_world)
 
@@ -134,8 +143,41 @@ class LocalScenario(object):
                         agent_type,
                         start_speed=0.0,
                         blueprint: carla.ActorBlueprint = None,
+                        bp_type=0,
                         vehicle_id=None):
-        # add a specified vehicle into vehicle list, but have not spawned it
+        '''
+        Add a specified vehicle into vehicle list, but have not spawned it
+
+            Parameters:
+                start_loc       :   The starting location of the NPC vehicle, 
+                                    specified as a dictionary with keys 'x' and 'y'.
+                end_loc         :   The ending location of the NPC vehicle, 
+                                    specified as a dictionary with keys 'x' and 'y'.
+                start_time      :   The starting time of the NPC vehicle's movement. 
+                                    In seconds. Max 2s.
+                behavior_type   :   Indicate the working status of the vehicle.
+                                    0: driving,
+                                    1: starting,
+                                    2: parked.
+                agent_type      :   The type of agent controlling the NPC vehicle, 
+                                    chosen from ['cautious', 'normal', 'aggressive'].
+                start_speed     :   The initial speed of the NPC vehicle,
+                                    defaults to 0.0 if not specified.
+                blueprint       :   The blueprint of the NPC vehicle, 
+                                    if not provided, a random blueprint will be used.
+                bp_type         :   The type of blueprint used for the NPC vehicle.
+                                    0: Car,
+                                    1: Truck,
+                                    2: Van,
+                                    3: Motorcycle,
+                                    4: Bicycle.
+                vehicle_id      :   Optional identifier for the NPC vehicle.
+
+            Returns             :   None. This function doesn't return anything.    
+
+
+        '''
+
         if behavior_type not in range(0, 3):
             behavior_type = 2
 
@@ -171,7 +213,18 @@ class LocalScenario(object):
             agent_type = 'normal'
 
         if blueprint == None:
-            blueprint = random.choice(self.vehicle_blueprint)
+            if bp_type == 0:
+                blueprint = random.choice(self.vehicle_car_bps)
+            elif bp_type == 1:
+                blueprint = random.choice(self.vehicle_truck_bps)
+            elif bp_type == 2:
+                blueprint = random.choice(self.vehicle_van_bps)
+            elif bp_type == 3:
+                blueprint = random.choice(self.vehicle_motorcycle_bps)
+            elif bp_type == 4:
+                blueprint = random.choice(self.vehicle_bycicle_bps)
+            else:
+                blueprint = random.choice(self.vehicle_blueprint)
 
         if vehicle_id == None:
             self.vehicle_count = self.vehicle_count + 1
@@ -194,7 +247,28 @@ class LocalScenario(object):
                        max_speed=1.4,
                        blueprint: carla.ActorBlueprint = None,
                        walker_id=None):
-        # add a specified vehicle into vehicle list, but have not spawned it
+        """
+        Add a specified walker into the walker list, but have not spawned it.
+
+            Parameters:
+                start_loc       :   The starting location of the NPC walker, 
+                                    specified as a dictionary with keys 'x' and 'y'.
+                end_loc         :   The ending location of the NPC walker, 
+                                    specified as a dictionary with keys 'x' and 'y'.
+                start_time      :   The starting time of the NPC walker's movement. 
+                                    In seconds.
+                behavior_type   :   Indicate the behavior type of the walker.
+                                    0: walking,
+                                    1: stopped.
+                max_speed       :   The maximum speed of the NPC walker, 
+                                    defaults to 1.4 if not specified.
+                blueprint       :   The blueprint of the NPC walker, 
+                                    if not provided, a random blueprint will be used.
+                walker_id       :   Optional identifier for the NPC walker.
+
+            Returns:
+                None. This function doesn't return anything.
+        """
         if behavior_type not in range(0, 1):
             behavior_type = 0
 
@@ -443,3 +517,20 @@ class LocalScenario(object):
         self.world_blueprint = world.get_blueprint_library()
         self.vehicle_blueprint = self.world_blueprint.filter('vehicle')
         self.walker_blueprint = self.world_blueprint.filter('walker')
+
+        self.vehicle_car_bps = [bp for bp in self.vehicle_blueprint if bp.get_attribute(
+            'base_type') == "car"]
+        self.vehicle_truck_bps = [bp for bp in self.vehicle_blueprint if bp.get_attribute(
+            'base_type') == "truck"]
+        self.vehicle_van_bps = [bp for bp in self.vehicle_blueprint if bp.get_attribute(
+            'base_type') == "van"]
+        self.vehicle_motorcycle_bps = [bp for bp in self.vehicle_blueprint if bp.get_attribute(
+            'base_type') == "motorcycle"]
+        self.vehicle_bycicle_bps = [bp for bp in self.vehicle_blueprint if bp.get_attribute(
+            'base_type') == "bycicle"]
+
+        print(self.vehicle_car_bps)
+        print(self.vehicle_truck_bps)
+        print(self.vehicle_van_bps)
+        print(self.vehicle_motorcycle_bps)
+        print(self.vehicle_bycicle_bps)
