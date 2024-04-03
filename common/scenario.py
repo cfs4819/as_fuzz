@@ -528,9 +528,3 @@ class LocalScenario(object):
             'base_type') == "motorcycle"]
         self.vehicle_bycicle_bps = [bp for bp in self.vehicle_blueprint if bp.get_attribute(
             'base_type') == "bycicle"]
-
-        print(self.vehicle_car_bps)
-        print(self.vehicle_truck_bps)
-        print(self.vehicle_van_bps)
-        print(self.vehicle_motorcycle_bps)
-        print(self.vehicle_bycicle_bps)
