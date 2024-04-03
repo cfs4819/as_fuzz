@@ -139,11 +139,11 @@ class LocalScenario(object):
                         start_loc: dict,
                         end_loc: dict,
                         start_time,
-                        behavior_type,
-                        agent_type,
+                        behavior_type:int,
+                        agent_type:int,
                         start_speed=0.0,
                         blueprint: carla.ActorBlueprint = None,
-                        bp_type=0,
+                        bp_type:int=0,
                         vehicle_id=None):
         '''
         Add a specified vehicle into vehicle list, but have not spawned it
@@ -160,7 +160,9 @@ class LocalScenario(object):
                                     1: starting,
                                     2: parked.
                 agent_type      :   The type of agent controlling the NPC vehicle, 
-                                    chosen from ['cautious', 'normal', 'aggressive'].
+                                    0: normal, 
+                                    1: cautious, 
+                                    2: aggressive.
                 start_speed     :   The initial speed of the NPC vehicle,
                                     defaults to 0.0 if not specified.
                 blueprint       :   The blueprint of the NPC vehicle, 
@@ -208,9 +210,11 @@ class LocalScenario(object):
         #                     size=0.1)
         # end_waypoint.transform.location.z += 2.5
 
-        valid_agent_types = ['cautious', 'normal', 'aggressive']
-        if agent_type not in valid_agent_types:
-            agent_type = 'normal'
+        agent_type_str = 'normal'
+        if agent_type == 1:
+            agent_type_str = 'cautious'
+        elif agent_type == 2:
+            agent_type_str = 'aggressive'
 
         if blueprint == None:
             if bp_type == 0:
@@ -235,7 +239,7 @@ class LocalScenario(object):
                                                 blueprint=blueprint,
                                                 start_time=start_time,
                                                 behavior_type=behavior_type,
-                                                agent_type=agent_type,
+                                                agent_type=agent_type_str,
                                                 start_speed=start_speed,
                                                 vehicle_id=vehicle_id))
 
