@@ -2,10 +2,12 @@ import random
 from deap import base, creator, tools, algorithms
 
 from gene import *
-
+from copy import deepcopy
+from MS_fuzz.fuzz_config.Config import Config
 
 class CEGA:
     def __init__(self,
+                 cfgs:Config,
                  logger=None):
 
         self.max_generation = 100
@@ -13,18 +15,69 @@ class CEGA:
 
         self.logger = logger
 
-        self.scene_length = 30
-        self.scene_width = 30
-        pass
+        self.scene_length = cfgs.scenario_length
+        self.scene_width = cfgs.scenario_width
 
     def evaluate(self,):
         pass
 
     def mate_walkers(self, ind1: GeneNpcWalkerList, ind2: GeneNpcWalkerList):
-        pass
+        offspring = GeneNpcWalkerList
+
+        for index in range(min(len(ind1.list), len(ind2.list))):
+            parent1 = ind1.list[index]
+            parent2 = ind2.list[index]
+
+            walker = GeneNpcWalker()
+            walker.start = random.choice([parent1.start, parent2.start])
+            walker.end = random.choice([parent1.end, parent2.end])
+            walker.start_time = random.choice(
+                [parent1.start_time, parent2.start_time])
+            walker.status = random.choice([parent1.status, parent2.status])
+            walker.max_speed = random.choice([parent1.max_speed, parent2.max_speed])
+            
+            offspring.list.append(walker)
+
+        for index in range(min(len(ind1.list), len(ind2.list)),
+                           max(len(ind1.list), len(ind2.list))):
+            if len(ind1.list) > len(ind2.list):
+                offspring.list.append(deepcopy(ind1.list[index]))
+            else:
+                offspring.list.append(deepcopy(ind2.list[index]))
+        
+        return offspring
 
     def mate_vehicles(self, ind1: GeneNpcVehicleList, ind2: GeneNpcVehicleList):
-        pass
+        offspring = GeneNpcVehicleList()
+
+        for index in range(min(len(ind1.list), len(ind2.list))):
+            parent1 = ind1.list[index]
+            parent2 = ind2.list[index]
+
+            vehicle = GeneNpcVehicle()
+
+            vehicle.start = random.choice([parent1.start, parent2.start])
+            vehicle.end = random.choice([parent1.end, parent2.end])
+            vehicle.start_time = random.choice(
+                [parent1.start_time, parent2.start_time])
+            vehicle.agent_type = random.choice(
+                [parent1.agent_type, parent2.agent_type])
+            vehicle.status = random.choice([parent1.status, parent2.status])
+
+            if vehicle.status == 0:
+                vehicle.initial_speed = random.choice(
+                    [parent1.initial_speed, parent2.initial_speed])
+
+            offspring.list.append(vehicle)
+
+        for index in range(min(len(ind1.list), len(ind2.list)),
+                           max(len(ind1.list), len(ind2.list))):
+            if len(ind1.list) > len(ind2.list):
+                offspring.list.append(deepcopy(ind1.list[index]))
+            else:
+                offspring.list.append(deepcopy(ind2.list[index]))
+
+        return offspring
 
     def mutate_walkers(self, ind: GeneNpcWalkerList):
         mut_pb = random()
@@ -34,8 +87,65 @@ class CEGA:
             ind.list.remove(random.choice(ind.list))
             return ind
 
+        # add a random agent, p = 0.3
+        elif ((mut_pb <= 0.2 + 0.3 and len(ind.list) < ind.max_walker_count) or
+              len(ind.list) < 1):
+            # generate a random start position and end position
+            start_x = random.uniform(-self.scene_length/2, self.scene_length/2)
+            start_y = random.uniform(-self.scene_width/2, self.scene_width/2)
+            end_x = random.uniform(-self.scene_length/2, self.scene_length/2*3)
+            end_y = random.uniform(-self.scene_width/2, self.scene_width/2)
+
+            new_walker = GeneNpcWalker()
+            new_walker.start = {'x': start_x, 'y': start_y, 'z': 0}
+            new_walker.end = {'x': end_x, 'y': end_y, 'z': 0}
+
+            new_walker.start_time = random.uniform(0, 2)
+
+            new_walker.status = random.choices([0, 1],
+                                               weights=[0.7, 0.3], k=1)[0]
+
+            if new_walker.status == 0:
+                new_walker.max_speed = random.uniform(0, 3)
+
+            ind.list.append(new_walker)
+
+            return ind
+
+        # mutate a random agent, p = 0.5
+        else:
+            ind.list.remove(random.choice(ind.list))
+            start_x = random.uniform(-self.scene_length/2, self.scene_length/2)
+            start_y = random.uniform(-self.scene_width/2, self.scene_width/2)
+            end_x = random.uniform(-self.scene_length/2, self.scene_length/2*3)
+            end_y = random.uniform(-self.scene_width/2, self.scene_width/2)
+
+            new_walker = GeneNpcWalker()
+            new_walker.start = {'x': start_x, 'y': start_y, 'z': 0}
+            new_walker.end = {'x': end_x, 'y': end_y, 'z': 0}
+
+            new_walker.start_time = random.uniform(0, 2)
+
+            new_walker.status = random.choices([0, 1],
+                                               weights=[0.7, 0.3], k=1)[0]
+
+            if new_walker.status == 0:
+                new_walker.max_speed = random.uniform(0, 3)
+
+            ind.list.append(new_walker)
+            return ind
+
+    def mutate_vehicles(self, ind: GeneNpcVehicleList):
+        mut_pb = random()
+
+        # remove a random agent, p = 0.2
+        if mut_pb <= 0.2 and len(ind.list) > 1:
+            ind.list.remove(random.choice(ind.list))
+            return ind
+
         # add a random vehicle, p = 0.3
-        elif mut_pb <= 0.2 + 0.3:
+        elif ((mut_pb <= 0.2 + 0.3 and len(ind.list) < ind.max_walker_count) or
+              len(ind.list) < 1):
             # generate a random start position and end position
             start_x = random.uniform(-self.scene_length/2, self.scene_length/2)
             start_y = random.uniform(-self.scene_width/2, self.scene_width/2)
@@ -110,21 +220,29 @@ class CEGA:
 
             return ind
 
-    def mutate_vehicles(self, ind: GeneNpcVehicleList):
-        mut_pb = random()
-
-        # remove a random agent, p = 0.2
-        if mut_pb <= 0.2 and len(ind.list) > 1:
-            ind.list.remove(random.choice(ind.list))
-            return ind
-
-        # add a random agent, p = 0.3
-
-        # mutate a random agent, p = 0.5
-
-        pass
-
     def main_progress(self):
+        if self.logger:
+            self.logger.info("Start GA:")
+        
+        CXPB = 0.6
+        MUTPB = 0.4
+
+        # Co-evolutionary Genetic Algorithm
+        tb_walkers = base.Toolbox()
+        tb_vehicles = base.Toolbox()
+
+        tb_walkers.register('mate', self.mate_walkers)
+        tb_walkers.register('mutate', self.mutate_walkers)
+        tb_walkers.register('select', tools.selNSGA2)
+
+        tb_vehicles.register('mate', self.mate_vehicles)
+        tb_vehicles.register('mutate', self.mutate_vehicles)
+        tb_vehicles.register('select', tools.selNSGA2)
+
+        # Evaluate Initial Population
+        if self.logger:            
+            self.logger.info(f' ====== Analyzing Initial Population ====== ')
+
         for gen in range(self.max_generation):
             if self.logger:
                 self.logger.info(f"Generation #{gen}. Start:")
