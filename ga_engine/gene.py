@@ -1,7 +1,7 @@
 import carla
 import threading
 from agents.navigation.behavior_agent import BehaviorAgent
-
+from deap import base
 from typing import List
 
 
@@ -20,7 +20,7 @@ class GeneNpcVehicle:
         self.end: dict = {'x': 0, 'y': 0, 'z': 0}      # "x": 0.0, "y": 0.0
         self.start_time: float = 0.0
         # 0: Car, 1: Truck, 2: Van, 3: Motorcycle, 4: Bicycle.
-        
+
         self.vehicle_type: int = 0
         self.initial_speed: float = 0.0
         self.status: int = 0     # 0: driving, 1: starting, 2: parked.
@@ -29,17 +29,41 @@ class GeneNpcVehicle:
         # self.status:int = 0     # 0: walking, 1: stopped
 
 
+class WalkerListFitness(base.Fitness):
+    """
+    Class to represent weight of each fitness function
+    """
+    # minimize closest distance between pair of ADC
+    # maximize number of unique decisions being made
+    # maximize pairs of conflict trajectory
+    # maximize unique violation
+    weights = [-1.0, 1.0, 1.0, 1.0]
+
+
+class VehicleListFitness(base.Fitness):
+    """
+    Class to represent weight of each fitness function
+    """
+    # minimize closest distance between pair of ADC
+    # maximize number of unique decisions being made
+    # maximize pairs of conflict trajectory
+    # maximize unique violation
+    weights = [-1.0, 1.0, 1.0, 1.0]
+
+
 class GeneNpcWalkerList:
-    def __init__(self, id, list: List[GeneNpcWalker], max_count: int = 20):
-        self.id = id
+    def __init__(self, id='', list: List[GeneNpcWalker] = None, max_count: int = 20):
+        self.id = id  # gen_{}
         self.list = list
 
         self.max_walker_count = max_count
+        self.fitness: base.Fitness = WalkerListFitness()
 
 
 class GeneNpcVehicleList:
-    def __init__(self, id, list: List[GeneNpcVehicle], max_count: int = 20):
+    def __init__(self, id='', list: List[GeneNpcVehicle] = None, max_count: int = 20):
         self.id = id
         self.list = list
 
         self.max_vehicle_count = max_count
+        self.fitness: base.Fitness = VehicleListFitness()
