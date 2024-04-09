@@ -5,9 +5,10 @@ from gene import *
 from copy import deepcopy
 from MS_fuzz.fuzz_config.Config import Config
 
+
 class CEGA:
     def __init__(self,
-                 cfgs:Config,
+                 cfgs: Config,
                  logger=None):
 
         self.max_generation = 100
@@ -18,7 +19,10 @@ class CEGA:
         self.scene_length = cfgs.scenario_length
         self.scene_width = cfgs.scenario_width
 
+        self.evaluate_list = []
+
     def evaluate(self,):
+        # TODO: return <walker_fitness, vehicle_fitness>
         pass
 
     def mate_walkers(self, ind1: GeneNpcWalkerList, ind2: GeneNpcWalkerList):
@@ -34,8 +38,9 @@ class CEGA:
             walker.start_time = random.choice(
                 [parent1.start_time, parent2.start_time])
             walker.status = random.choice([parent1.status, parent2.status])
-            walker.max_speed = random.choice([parent1.max_speed, parent2.max_speed])
-            
+            walker.max_speed = random.choice(
+                [parent1.max_speed, parent2.max_speed])
+
             offspring.list.append(walker)
 
         for index in range(min(len(ind1.list), len(ind2.list)),
@@ -44,7 +49,7 @@ class CEGA:
                 offspring.list.append(deepcopy(ind1.list[index]))
             else:
                 offspring.list.append(deepcopy(ind2.list[index]))
-        
+
         return offspring
 
     def mate_vehicles(self, ind1: GeneNpcVehicleList, ind2: GeneNpcVehicleList):
@@ -90,26 +95,7 @@ class CEGA:
         # add a random agent, p = 0.3
         elif ((mut_pb <= 0.2 + 0.3 and len(ind.list) < ind.max_walker_count) or
               len(ind.list) < 1):
-            # generate a random start position and end position
-            start_x = random.uniform(-self.scene_length/2, self.scene_length/2)
-            start_y = random.uniform(-self.scene_width/2, self.scene_width/2)
-            end_x = random.uniform(-self.scene_length/2, self.scene_length/2*3)
-            end_y = random.uniform(-self.scene_width/2, self.scene_width/2)
-
-            new_walker = GeneNpcWalker()
-            new_walker.start = {'x': start_x, 'y': start_y, 'z': 0}
-            new_walker.end = {'x': end_x, 'y': end_y, 'z': 0}
-
-            new_walker.start_time = random.uniform(0, 2)
-
-            new_walker.status = random.choices([0, 1],
-                                               weights=[0.7, 0.3], k=1)[0]
-
-            if new_walker.status == 0:
-                new_walker.max_speed = random.uniform(0, 3)
-
-            ind.list.append(new_walker)
-
+            ind.list.append(ind.get_a_new_agent())
             return ind
 
         # mutate a random agent, p = 0.5
@@ -146,33 +132,7 @@ class CEGA:
         # add a random vehicle, p = 0.3
         elif ((mut_pb <= 0.2 + 0.3 and len(ind.list) < ind.max_walker_count) or
               len(ind.list) < 1):
-            # generate a random start position and end position
-            start_x = random.uniform(-self.scene_length/2, self.scene_length/2)
-            start_y = random.uniform(-self.scene_width/2, self.scene_width/2)
-            end_x = random.uniform(-self.scene_length/2, self.scene_length/2*3)
-            end_y = random.uniform(-self.scene_width/2, self.scene_width/2)
-            while abs(start_y - end_y) <= 5:
-                end_y = random.uniform(-self.scene_width/2, self.scene_width/2)
-
-            new_vehicle = GeneNpcVehicle()
-
-            new_vehicle.start = {'x': start_x, 'y': start_y, 'z': 0}
-            new_vehicle.end = {'x': end_x, 'y': end_y, 'z': 0}
-
-            new_vehicle.start_time = random.uniform(0, 2)
-
-            new_vehicle.vehicle_type = random.choices([0, 1, 2, 3],
-                                                      weights=[0.4, 0.3, 0.2, 0.1], k=1)[0]
-
-            new_vehicle.status = random.choices([0, 1, 2],
-                                                weights=[0.6, 0.3, 0.1], k=1)[0]
-
-            new_vehicle.agent_type = random.choices([0, 1, 2],
-                                                    weights=[0.6, 0.2, 0.2], k=1)[0]
-            if new_vehicle.status == 0:
-                new_vehicle.initial_speed = random.uniform(0, 20)
-
-            ind.list.append(new_vehicle)
+            ind.list.append(ind.get_a_new_agent())
             return ind
 
         # mutate a random agent, p = 0.5
@@ -223,9 +183,12 @@ class CEGA:
     def main_progress(self):
         if self.logger:
             self.logger.info("Start GA:")
-        
-        CXPB = 0.6
-        MUTPB = 0.4
+
+        # GA Hyperparameters
+        POP_SIZE = 10   # number of population
+        OFF_SIZE = 10   # number of offspring to produce
+        CXPB = 0.6      # crossover probability
+        MUTPB = 0.4     # mutation probability
 
         # Co-evolutionary Genetic Algorithm
         tb_walkers = base.Toolbox()
@@ -239,98 +202,72 @@ class CEGA:
         tb_vehicles.register('mutate', self.mutate_vehicles)
         tb_vehicles.register('select', tools.selNSGA2)
 
+        pop_walkers = [get_new_walker_ind() for _ in range(POP_SIZE)]
+        pop_vehicles = [get_new_vehicle_ind() for _ in range(POP_SIZE)]
+
+        for index, c in enumerate(pop_walkers):
+            c.id = f'gen_0_ind_{index}'
+        for index, c in enumerate(pop_vehicles):
+            c.id = f'gen_0_ind_{index}'
+
+        hof_walkers = tools.ParetoFront()
+        hof_vehicles = tools.ParetoFront()
+
         # Evaluate Initial Population
-        if self.logger:            
+        if self.logger:
             self.logger.info(f' ====== Analyzing Initial Population ====== ')
 
-        for gen in range(self.max_generation):
+        for index in range(POP_SIZE):
+            walker_ind = pop_walkers[index]
+            vehicle_ind = pop_vehicles[index]
+
+            # only those individuals with invalid fitness need to be evaluated
+            if walker_ind.fitness.valid and vehicle_ind.fitness.valid:
+                continue
+
+            # or add them to evaluate list
+            total_fitness = self.evaluate(walker_ind, vehicle_ind)
+            walker_ind.fitness.values = total_fitness[0]
+            vehicle_ind.fitness.values = total_fitness[1]
+
+        hof_walkers.update(pop_walkers)
+        hof_vehicles.update(pop_vehicles)
+
+        for gen in range(1, self.max_generation):
             if self.logger:
                 self.logger.info(f"Generation #{gen}. Start:")
 
-        pass
+            # Vary the population
+            offspring_walkers = algorithms.varOr(
+                pop_walkers, tb_walkers, OFF_SIZE, CXPB, MUTPB)
+            offspring_vehicles = algorithms.varOr(
+                pop_vehicles, tb_vehicles, OFF_SIZE, CXPB, MUTPB)
 
+            for index, c in enumerate(offspring_walkers):
+                c.id = f'gen_{gen}_ind_{index}'
+            for index, c in enumerate(offspring_vehicles):
+                c.id = f'gen_{gen}_ind_{index}'
 
-# 定义问题相关参数
-NUM_INDIVIDUALS = 100
-NUM_GENERATIONS = 50
+            # Evaluate the individuals with an invalid fitness
+            for index in range(OFF_SIZE):
+                walker_ind = offspring_walkers[index]
+                vehicle_ind = offspring_vehicles[index]
 
-# 定义适应度评估函数
+                # only those individuals with invalid fitness need to be evaluated
+                if walker_ind.fitness.valid and vehicle_ind.fitness.valid:
+                    continue
 
+                # or add them to evaluate list
+                total_fitness = self.evaluate(walker_ind, vehicle_ind)
+                walker_ind.fitness.values = total_fitness[0]
+                vehicle_ind.fitness.values = total_fitness[1]
 
-def evaluate(ind1, ind2):
-    # 自定义评估函数，计算两个种群的适应度
-    fitness1, diversity1 = ind1.evaluate()  # 自定义的评估函数
-    fitness2, diversity2 = ind2.evaluate()  # 自定义的评估函数
-    return fitness1, fitness2, diversity1, diversity2
+            hof_walkers.update(offspring_walkers)
+            hof_vehicles.update(offspring_vehicles)
 
+            # population update
+            pop_walkers[:] = tb_walkers.select(
+                pop_walkers + offspring_walkers, POP_SIZE)
+            pop_vehicles[:] = tb_vehicles.select(
+                pop_vehicles + offspring_vehicles, POP_SIZE)
 
-# 创建适应度类，包含优秀分和多样性分
-creator.create("FitnessMulti", base.Fitness, weights=(1.0, 1.0, -1.0, -1.0))
-
-# 创建个体类
-creator.create("Individual", list, fitness=creator.FitnessMulti)
-
-# 定义mate和mutate函数，用标准函数调用自定义函数
-
-
-def mate(ind1, ind2):
-    if ind1.is_from_popA and ind2.is_from_popA:
-        return popA_mate(ind1, ind2)
-    elif ind1.is_from_popB and ind2.is_from_popB:
-        return popB_mate(ind1, ind2)
-    else:
-        raise ValueError("Invalid mating combination")
-
-
-def mutate(ind):
-    if ind.is_from_popA:
-        return popA_mutate(ind)
-    elif ind.is_from_popB:
-        return popB_mutate(ind)
-    else:
-        raise ValueError("Invalid mutation operation")
-
-
-# 创建toolbox对象
-toolbox = base.Toolbox()
-
-# 注册标准的mate和mutate函数到toolbox
-toolbox.register("mate", mate)
-toolbox.register("mutate", mutate)
-
-# 注册选择算子
-toolbox.register("select", tools.selNSGA2)  # 或者使用NSGAIII: tools.selNSGA3
-
-# 注册生成个体和种群的函数
-toolbox.register("individual", tools.initRepeat,
-                 creator.Individual, (random(), random()), n=2)
-toolbox.register("population", tools.initRepeat, list, toolbox.individual)
-
-# 注册评估函数
-toolbox.register("evaluate", evaluate)
-
-# 创建种群A和种群B
-populationA = toolbox.population(n=NUM_INDIVIDUALS)
-populationB = toolbox.population(n=NUM_INDIVIDUALS)
-
-# 开始进化
-for gen in range(NUM_GENERATIONS):
-    offspringA = algorithms.varAnd(populationA, toolbox, cxpb=0.5, mutpb=0.2)
-    offspringB = algorithms.varAnd(populationB, toolbox, cxpb=0.5, mutpb=0.2)
-
-    fitsA = toolbox.map(toolbox.evaluate, offspringA)
-    fitsB = toolbox.map(toolbox.evaluate, offspringB)
-
-    for indA, fitA, indB, fitB in zip(offspringA, fitsA, offspringB, fitsB):
-        indA.fitness.values = fitA
-        indB.fitness.values = fitB
-
-    populationA = toolbox.select(offspringA + populationA, k=NUM_INDIVIDUALS)
-    populationB = toolbox.select(offspringB + populationB, k=NUM_INDIVIDUALS)
-
-# 获取最优解
-best_indA = tools.selBest(populationA, k=1)[0]
-best_indB = tools.selBest(populationB, k=1)[0]
-
-print("Best individual in population A:", best_indA)
-print("Best individual in population B:", best_indB)
