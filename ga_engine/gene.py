@@ -1,4 +1,5 @@
 import carla
+import random
 import threading
 from agents.navigation.behavior_agent import BehaviorAgent
 from deap import base
@@ -37,7 +38,7 @@ class WalkerListFitness(base.Fitness):
     # maximize number of unique decisions being made
     # maximize pairs of conflict trajectory
     # maximize unique violation
-    weights = [-1.0, 1.0, 1.0, 1.0]
+    weights = (-1.0, 1.0, 1.0, 1.0)
 
 
 class VehicleListFitness(base.Fitness):
@@ -48,7 +49,7 @@ class VehicleListFitness(base.Fitness):
     # maximize number of unique decisions being made
     # maximize pairs of conflict trajectory
     # maximize unique violation
-    weights = [-1.0, 1.0, 1.0, 1.0]
+    weights = (-1.0, 1.0, 1.0, 1.0)
 
 
 class GeneNpcWalkerList:
@@ -59,6 +60,27 @@ class GeneNpcWalkerList:
         self.max_walker_count = max_count
         self.fitness: base.Fitness = WalkerListFitness()
 
+    def get_a_new_agent(self):
+        # generate a random start position and end position
+        start_x = random.uniform(-self.scene_length/2, self.scene_length/2)
+        start_y = random.uniform(-self.scene_width/2, self.scene_width/2)
+        end_x = random.uniform(-self.scene_length/2, self.scene_length/2*3)
+        end_y = random.uniform(-self.scene_width/2, self.scene_width/2)
+
+        new_walker = GeneNpcWalker()
+        new_walker.start = {'x': start_x, 'y': start_y, 'z': 0}
+        new_walker.end = {'x': end_x, 'y': end_y, 'z': 0}
+
+        new_walker.start_time = random.uniform(0, 2)
+
+        new_walker.status = random.choices([0, 1],
+                                           weights=[0.7, 0.3], k=1)[0]
+
+        if new_walker.status == 0:
+            new_walker.max_speed = random.uniform(0, 3)
+
+        return new_walker
+
 
 class GeneNpcVehicleList:
     def __init__(self, id='', list: List[GeneNpcVehicle] = None, max_count: int = 20):
@@ -67,3 +89,54 @@ class GeneNpcVehicleList:
 
         self.max_vehicle_count = max_count
         self.fitness: base.Fitness = VehicleListFitness()
+
+    def get_a_new_agent(self):
+        # generate a random start position and end position
+        start_x = random.uniform(-self.scene_length/2, self.scene_length/2)
+        start_y = random.uniform(-self.scene_width/2, self.scene_width/2)
+        end_x = random.uniform(-self.scene_length/2, self.scene_length/2*3)
+        end_y = random.uniform(-self.scene_width/2, self.scene_width/2)
+        while abs(start_y - end_y) <= 5:
+            end_y = random.uniform(-self.scene_width/2, self.scene_width/2)
+
+        new_vehicle = GeneNpcVehicle()
+
+        new_vehicle.start = {'x': start_x, 'y': start_y, 'z': 0}
+        new_vehicle.end = {'x': end_x, 'y': end_y, 'z': 0}
+
+        new_vehicle.start_time = random.uniform(0, 2)
+
+        new_vehicle.vehicle_type = random.choices([0, 1, 2, 3],
+                                                  weights=[0.4, 0.3, 0.2, 0.1], k=1)[0]
+
+        new_vehicle.status = random.choices([0, 1, 2],
+                                            weights=[0.6, 0.3, 0.1], k=1)[0]
+
+        new_vehicle.agent_type = random.choices([0, 1, 2],
+                                                weights=[0.6, 0.2, 0.2], k=1)[0]
+        if new_vehicle.status == 0:
+            new_vehicle.initial_speed = random.uniform(0, 20)
+
+        return new_vehicle
+
+
+def get_new_walker_ind():
+    ind = GeneNpcVehicleList()
+    ind.list.append(ind.get_a_new_agent())
+    return ind
+
+
+def get_new_vehicle_ind():
+    ind = GeneNpcVehicleList()
+    ind.list.append(ind.get_a_new_agent())
+    return ind
+
+
+def save_pop(vehicle_pop: List[GeneNpcVehicleList],
+             walker_pop: List[GeneNpcWalkerList],
+             file_path):
+    pass
+
+
+def load_pop(file_path):
+    pass
