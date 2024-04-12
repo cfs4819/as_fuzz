@@ -20,9 +20,10 @@ class GeneNpcVehicle:
         self.start: dict = {'x': 0, 'y': 0, 'z': 0}    # "x": 0.0, "y": 0.0
         self.end: dict = {'x': 0, 'y': 0, 'z': 0}      # "x": 0.0, "y": 0.0
         self.start_time: float = 0.0
-        # 0: Car, 1: Truck, 2: Van, 3: Motorcycle, 4: Bicycle.
 
         self.vehicle_type: int = 0
+        # 0: Car, 1: Truck, 2: Van, 3: Motorcycle, 4: Bicycle.
+
         self.initial_speed: float = 0.0
         self.status: int = 0     # 0: driving, 1: starting, 2: parked.
         self.agent_type: int = 0  # 0: normal, 1: cautious, 2: aggressive.
@@ -55,7 +56,7 @@ class VehicleListFitness(base.Fitness):
 class GeneNpcWalkerList:
     def __init__(self, id='', list: List[GeneNpcWalker] = None, max_count: int = 20):
         self.id = id  # gen_{}
-        self.list = list
+        self.list: List[GeneNpcWalker] = list
 
         self.max_walker_count = max_count
         self.fitness: base.Fitness = WalkerListFitness()
@@ -85,7 +86,7 @@ class GeneNpcWalkerList:
 class GeneNpcVehicleList:
     def __init__(self, id='', list: List[GeneNpcVehicle] = None, max_count: int = 20):
         self.id = id
-        self.list = list
+        self.list: List[GeneNpcVehicle] = list
 
         self.max_vehicle_count = max_count
         self.fitness: base.Fitness = VehicleListFitness()
