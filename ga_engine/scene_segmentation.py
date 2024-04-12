@@ -13,10 +13,10 @@ class Segment(object):
                  rotation: carla.Rotation,
                  length: float, width: float,
                  is_junction=False):
-        self.location = location
-        self.rotation = rotation
-        self.length = length
-        self.width = width
+        self.location:carla.Location = location
+        self.rotation:carla.Rotation = rotation
+        self.length:float = length
+        self.width:float = width
 
         self.is_junction = is_junction
 
@@ -29,8 +29,8 @@ class SceneSegment(object):
                  vehicle: carla.Vehicle,
                  logger=None,
                  debug=False):
-        self.carla_world = world
-        self.ego_vehicle = vehicle
+        self.carla_world: carla.World = world
+        self.ego_vehicle: carla.Vehicle = vehicle
         self.logger = logger
         self.debug = debug
 
