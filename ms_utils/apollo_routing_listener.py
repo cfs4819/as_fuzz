@@ -94,8 +94,6 @@ class ApolloRoutingListener:
                     self.routing.append(
                         f'{segment.id}_{int(segment.start_s)}_{int(segment.end_s)}')
                     self.routing_wps.append([lane_wp_s, lane_wp_e])
-            # print(self.routing)
-            # print(self.routing_wps)
         if self.debug:
             if self.logger != None:
                 self.logger.info(f"waypoints:{self.routing_wps}")

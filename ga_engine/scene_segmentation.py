@@ -4,6 +4,7 @@ from typing import List
 import time
 import signal
 import pdb
+import xml.etree.ElementTree as ET
 
 from MS_fuzz.ms_utils.apollo_routing_listener import ApolloRoutingListener
 
@@ -13,12 +14,15 @@ class Segment(object):
                  rotation: carla.Rotation,
                  length: float, width: float,
                  is_junction=False):
-        self.location:carla.Location = location
-        self.rotation:carla.Rotation = rotation
-        self.length:float = length
-        self.width:float = width
+        self.location: carla.Location = location
+        self.rotation: carla.Rotation = rotation
+        self.length: float = length
+        self.width: float = width
 
         self.is_junction = is_junction
+
+        self.belongs_to_roadid = ''
+        self.type = ('straight', -1)
 
         self.bbox: carla.BoundingBox = carla.BoundingBox(
             location, carla.Vector3D(self.length/2, self.width/2, 2))
@@ -31,8 +35,19 @@ class SceneSegment(object):
                  debug=False):
         self.carla_world: carla.World = world
         self.ego_vehicle: carla.Vehicle = vehicle
+        self.carla_map: carla.Map = self.carla_world.get_map()
+        self.xodr_str = self.carla_map.to_opendrive()
+        self.xodr_root = ET.fromstring(self.xodr_str)
         self.logger = logger
         self.debug = debug
+
+        self.map_roads = {}
+        self.map_junctions = {}
+        self.map_road_to_junctions = {}
+
+        self.phrase_xodr()
+        # print(self.map_roads)
+        # print(self.map_junctions)
 
         self.routing_listener = ApolloRoutingListener(self.carla_world,
                                                       ego_vehicle=self.ego_vehicle,
@@ -43,15 +58,68 @@ class SceneSegment(object):
         #                                               logger=self.logger,
         #                                               debug=False)
 
-        self.segments = []
+        self.segments: List[Segment] = []
 
         self.stop_listening = False
+
+    def phrase_xodr(self):
+        for road in self.xodr_root.findall('road'):
+            if road.get('junction') != '-1':
+                self.map_road_to_junctions[road.get(
+                    'id')] = road.get('junction')
+            # pdb.set_trace()
+            left_lane = [lan.get('id') for lan in (road.find('.//laneSection/left') or []).findall(
+                'lane') if lan.get('type') == 'driving'] if road.find('.//laneSection/left') is not None else []
+            right_lane = [lan.get('id') for lan in (road.find('.//laneSection/right') or []).findall(
+                'lane') if lan.get('type') == 'driving'] if road.find('.//laneSection/right') is not None else []
+
+            lane_count = len(left_lane) + len(right_lane)
+            self.map_roads[road.get('id')] = {'lane_num': lane_count, 'left_lane': left_lane,
+                                              'right_lane': right_lane}
+        for junction in self.xodr_root.findall('junction'):
+            connections = junction.findall('.//connection')
+            incoming_roads = set()
+            for connection in connections:
+                incoming_roads.add(connection.get('incomingRoad'))
+            self.map_junctions[junction.get('id')] = {'dir_count': len(
+                incoming_roads), 'incoming_roads': list(incoming_roads)}
 
     def interpolate_location(start, end, fraction):
         x = start.x + (end.x - start.x) * fraction
         y = start.y + (end.y - start.y) * fraction
         z = start.z + (end.z - start.z) * fraction
         return carla.Location(x, y, z)
+
+    def get_seg_type(self, seg: Segment, commmon_size=(30, 30)):
+        road_id = seg.belongs_to_roadid.split('_')[1]
+        if seg.is_junction:
+            size = 'large'
+            if seg.width <= commmon_size[0] and seg.length <= commmon_size[1]:
+                size = 'small'
+            elif seg.width <= 2*commmon_size[0] and seg.length <= 2*commmon_size[1]:
+                size = 'medium'
+
+            if road_id not in self.map_road_to_junctions:
+                return f'junction_{size}_-1dir'
+
+            jun_index = self.map_road_to_junctions[road_id]
+            if jun_index not in self.map_junctions:
+                return f'junction_{size}_-1dir'
+
+            # for example 'junction_medium_3dir'
+            return f"junction_{size}_{self.map_junctions[jun_index]['dir_count']}dir"
+
+        else:
+            if road_id in self.map_roads:
+                lan_dir = '2way'
+                if len(self.map_roads[road_id]['left_lane']) == 0 or \
+                        len(self.map_roads[road_id]['right_lane']) == 0:
+                    lan_dir = '1way'
+
+                # for example 'straight_2way_8lane'
+                return (f"straight_{lan_dir}_{self.map_roads[road_id]['lane_num']}lane")
+            else:
+                return ('straight_-1way_-1lane')
 
     def get_curr_seg():
         pass
@@ -61,13 +129,13 @@ class SceneSegment(object):
 
     def wait_for_route(self, req_time, interval=-2, wait_from_req_time=False):
         self.stop_listening = False
-        if wait_from_req_time :
+        if wait_from_req_time:
             while self.routing_listener.req_time == None or \
-                (self.routing_listener.req_time - req_time) <= interval:
+                    (self.routing_listener.req_time - req_time) <= interval:
                 if self.stop_listening == True:
                     break
                 time.sleep(0.1)
-        else: 
+        else:
             while self.routing_listener.recv_time == None or \
                     (self.routing_listener.recv_time - req_time) <= interval:
                 if self.stop_listening == True:
@@ -150,7 +218,9 @@ class SceneSegment(object):
 
     def get_segments(self, length: float, width: float):
         self.segments = []
+        routting_road = []
         with self.routing_listener.lock:
+            routting_road = self.routing_listener.routing
             routing_wps = self.routing_listener.routing_wps
         # pdb.set_trace()
         if routing_wps[0][0] == None:
@@ -162,18 +232,26 @@ class SceneSegment(object):
 
         for i, route_wp in enumerate(routing_wps):
             if route_wp[1].is_junction:
-                self.segments += self.get_seg_from_junction_wp(route_wp[0],
-                                                               length, width)
+                junction_segs = self.get_seg_from_junction_wp(route_wp[0],
+                                                              length, width)
+                for seg in junction_segs:
+                    seg.belongs_to_roadid = routting_road[i]
+                self.segments += junction_segs
                 continue
 
             if i == len(routing_wps) - 1:
                 # handle the final segment
-                self.segments += self.get_seg_between_two_wp(route_wp[0],
-                                                             route_wp[1],
-                                                             length, width)
+                final_segs = self.get_seg_between_two_wp(route_wp[0],
+                                                         route_wp[1],
+                                                         length, width)
+                for seg in final_segs:
+                    seg.belongs_to_roadid = routting_road[i]
+                self.segments += final_segs
                 continue
-            self.segments += self.get_seg_from_full_road(
-                route_wp, length, width)
+            between_segs = self.get_seg_from_full_road(route_wp, length, width)
+            for seg in between_segs:
+                seg.belongs_to_roadid = routting_road[i]
+            self.segments += between_segs
 
         if self.debug:
             carla_db = self.carla_world.debug
