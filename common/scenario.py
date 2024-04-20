@@ -14,6 +14,9 @@ from typing import List
 from MS_fuzz.ga_engine.gene import *
 
 from agents.navigation.behavior_agent import BehaviorAgent
+from MS_fuzz.ga_engine.scene_segmentation import Segment
+from MS_fuzz.ms_utils import calc_relative_loc, calc_relative_loc_dict
+from MS_fuzz.ga_engine.gene import GeneNpcWalkerList, GeneNpcVehicleList
 
 
 class NpcBase(object):
@@ -29,6 +32,7 @@ class NpcBase(object):
         self.waypoints = []
         self.start_time = start_time
 
+        self.spawned = False
         self.is_running = False
         self.reached_destination = False
         self.control_thread: threading.Thread = None
@@ -104,6 +108,8 @@ class LocalScenario(object):
                  carla_world: carla.World,
                  ego_vhicle: carla.Vehicle,
                  logger=logger):
+        self.id = ''
+        self.scen_seg: Segment = None
         self.logger = logger
         self.ego = ego_vhicle  # dict
         self.carla_world: carla.World = carla_world
@@ -135,15 +141,50 @@ class LocalScenario(object):
         self.vehicle_count = 0
         self.walker_count = 0
 
+    def add_npc_walkers_form_gene(self, gene: GeneNpcWalkerList):
+        base_ref = carla.Transform(
+            self.scen_seg.location, self.scen_seg.rotation)
+        for index, walker in enumerate(gene.list):
+            start_loc = calc_relative_loc_dict(base_ref, walker.start['x'],
+                                               walker.start['y'], walker.start['z'])
+            end_loc = calc_relative_loc_dict(base_ref, walker.end['x'],
+                                             walker.end['y'], walker.end['z'])
+            self.add_npc_walker(start_loc=start_loc,
+                                end_loc=end_loc,
+                                start_time=walker.start_time,
+                                behavior_type=walker.status,
+                                max_speed=walker.max_speed,
+                                walker_id=f'sce_{self.id}_walker_{index}')
+
+    def add_npc_vehicles_form_gene(self, gene: GeneNpcVehicleList):
+        base_ref = carla.Transform(
+            self.scen_seg.location, self.scen_seg.rotation)
+        for index, vehicle in enumerate(gene.list):
+            start_loc = calc_relative_loc_dict(base_ref, vehicle.start['x'],
+                                               vehicle.start['y'], vehicle.start['z'])
+            end_loc = calc_relative_loc_dict(base_ref, vehicle.end['x'],
+                                             vehicle.end['y'], vehicle.end['z'])
+            self.add_npc_vehicle(start_loc=start_loc,
+                                 end_loc=end_loc,
+                                 start_time=vehicle.start_time,
+                                 behavior_type=vehicle.status,
+                                 agent_type=vehicle.agent_type,
+                                 start_speed=vehicle.initial_speed,
+                                 bp_type=vehicle.vehicle_type,
+                                 vehicle_id=f'sce_{self.id}_vehicle_{index}')
+
+    # def renew_gene(self, gene_vehicle: GeneNpcVehicleList, gene_walker: GeneNpcWalkerList):
+    #     pass
+
     def add_npc_vehicle(self,
                         start_loc: dict,
                         end_loc: dict,
                         start_time,
-                        behavior_type:int,
-                        agent_type:int,
+                        behavior_type: int,
+                        agent_type: int,
                         start_speed=0.0,
                         blueprint: carla.ActorBlueprint = None,
-                        bp_type:int=0,
+                        bp_type: int = 0,
                         vehicle_id=None):
         '''
         Add a specified vehicle into vehicle list, but have not spawned it
@@ -320,7 +361,7 @@ class LocalScenario(object):
                 logger.warning(
                     f"Vehicle spawned failed: id is {vehicle.vehicle_id}")
                 continue
-
+            vehicle.spawned = True
             logger.info(
                 f"Vehicle spawned: id is {vehicle.vehicle_id}")
             if vehicle.behavior_type == 2:
@@ -343,6 +384,7 @@ class LocalScenario(object):
                 logger.warning(
                     f"Walker spawned failed: id is {walker.walker_id}")
                 continue
+            walker.spawned = True
             if walker.behavior_type == 1:
                 continue
             walker_controller_bp = self.world_blueprint.find(
