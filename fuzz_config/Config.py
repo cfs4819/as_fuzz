@@ -44,6 +44,8 @@ class Config:
         self.dreamview_port  = 8888
 
         # Fuzzer config
+        self.scenario_length = 30
+        self.scenario_width = 30
         self.topo_k = 2
         self.immobile_percentage = 0  # the percentage of the actors is immobile forever
         self.max_cycles = 0
