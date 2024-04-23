@@ -2,11 +2,14 @@ import carla
 import math
 from typing import List
 import time
+import threading
 import signal
 import pdb
 import xml.etree.ElementTree as ET
 
+
 from MS_fuzz.ms_utils.apollo_routing_listener import ApolloRoutingListener
+from MS_fuzz.ms_utils import rotate_point
 
 
 class Segment(object):
@@ -45,6 +48,13 @@ class SceneSegment(object):
         self.map_junctions = {}
         self.map_road_to_junctions = {}
 
+        self.finished_index = -1
+        self.curr_seg_index = -1
+        self.belongs_to_two_index = (True, False)
+        # normal: [ *] [ ]; between: [ [*] ]; neither: [ ]*[ ]
+        #         ↑                  ↑                 ↑
+        #         curr_index         curr_index        curr_index
+
         self.phrase_xodr()
         # print(self.map_roads)
         # print(self.map_junctions)
@@ -60,6 +70,8 @@ class SceneSegment(object):
 
         self.segments: List[Segment] = []
 
+        self.vehicle_pos_listener_thread: threading.Thread = None
+        self.stop_listening_vehicle_pos = False
         self.stop_listening = False
 
     def phrase_xodr(self):
@@ -83,6 +95,75 @@ class SceneSegment(object):
                 incoming_roads.add(connection.get('incomingRoad'))
             self.map_junctions[junction.get('id')] = {'dir_count': len(
                 incoming_roads), 'incoming_roads': list(incoming_roads)}
+
+    def strat_vehicle_pos_listening(self):
+        self.vehicle_pos_listener_thread = threading.Thread(
+            target=self.listening_thread)
+        self.stop_listening_vehicle_pos = False
+        self.vehicle_pos_listener_thread.start()
+
+    def stop_vehicle_pos_listening(self):
+        self.stop_listening_vehicle_pos = True
+        if self.vehicle_pos_listener_thread:
+            self.vehicle_pos_listener_thread.join()
+
+    def listening_thread(self):
+        last_in_curr = False
+        while not self.stop_listening_vehicle_pos:
+            pos = self.ego_vehicle.get_location()
+            if len(self.segments) == 0:
+                # have not yet gain segments from routing listener
+                self.finished_index = -1
+                continue
+            if self.finished_index == len(self.segments) - 1:
+                # have finished all segments
+                self.curr_seg_index = len(self.segments) - 1
+                break
+            if self.curr_seg_index < 0:
+                # have not yet reach the first segment
+                self.finished_index = -1
+                # wait until reach the first segment
+                while not self.check_if_loc_in_segment(pos, self.segments[0]):
+                    pos = self.ego_vehicle.get_location()
+                    if self.stop_listening_vehicle_pos:
+                        break
+                # now reached the first segment
+                self.curr_seg_index = 0
+                last_in_curr = True
+                continue
+            in_curr = self.check_if_loc_in_segment(
+                pos, self.segments[self.curr_seg_index])
+            in_next = False
+            if self.finished_index < len(self.segments) - 2:
+                in_next = self.check_if_loc_in_segment(
+                    pos, self.segments[self.curr_seg_index + 1])
+            self.belongs_to_two_index = (in_curr, in_next)
+            if in_curr == last_in_curr:
+                if in_next and not in_curr:
+                    # [ ] *[ ] ->[ ] [* ]
+                    self.finished_index = self.curr_seg_index
+                    self.curr_seg_index += 1
+                    last_in_curr = in_next
+                continue
+            else:
+                if in_curr and in_next:
+                    # [ [*] ] -> [ []* ]
+                    self.finished_index = self.curr_seg_index
+                    self.curr_seg_index += 1
+                    last_in_curr = in_next
+                if not in_curr and not in_next:
+                    # [ *] [ ] -> [ ]* [ ]
+                    self.finished_index = self.curr_seg_index
+                last_in_curr = in_curr
+                continue
+
+    def check_if_loc_in_segment(self, pos: carla.Location, seg: Segment):
+        dx = pos.x - seg.location.x
+        dy = pos.y - seg.location.y
+        local_x, local_y = rotate_point(dx, dy, -seg.rotation.yaw)
+        half_width = seg.width / 2
+        half_length = seg.length / 2
+        return (-half_length <= local_x <= half_length) and (-half_width <= local_y <= half_width)
 
     def interpolate_location(start, end, fraction):
         x = start.x + (end.x - start.x) * fraction
@@ -120,13 +201,6 @@ class SceneSegment(object):
                 return (f"straight_{lan_dir}_{self.map_roads[road_id]['lane_num']}lane")
             else:
                 return ('straight_-1way_-1lane')
-
-    def get_curr_seg():
-        pass
-
-    def get_next_seg():
-        pass
-
     def wait_for_route(self, req_time, interval=-2, wait_from_req_time=False):
         self.stop_listening = False
         if wait_from_req_time:
