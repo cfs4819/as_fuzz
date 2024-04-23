@@ -19,10 +19,28 @@ class CEGA:
         self.scene_length = cfgs.scenario_length
         self.scene_width = cfgs.scenario_width
 
+        self.type = 'straight'  # straight, junction
+        self.lane_num = 4
+        self.junction_direction_num = 4
+
         self.evaluate_list = []
 
     def evaluate(self,):
-        # TODO: return <walker_fitness, vehicle_fitness>
+        '''
+        TODO:
+            1. Target:
+                wait for evaluate result
+                then return <walker_fitness, vehicle_fitness>
+            2. for all individuals:
+                f_distance: the minimum distance between ego and other npcs during the simulation time t
+                f_smooth : represents the ego vehicle's acceleration during a scene
+                f_diversity: diversity of the scene
+            3. for npc_walkers:
+                f_crossing_time : Time taken to cross the road
+            4. for npc_vehicles:s
+                f_interaction_rate: the rate at which vehicles interact with the ego vehicle
+        '''
+
         pass
 
     def mate_walkers(self, ind1: GeneNpcWalkerList, ind2: GeneNpcWalkerList):
@@ -270,4 +288,3 @@ class CEGA:
                 pop_walkers + offspring_walkers, POP_SIZE)
             pop_vehicles[:] = tb_vehicles.select(
                 pop_vehicles + offspring_vehicles, POP_SIZE)
-

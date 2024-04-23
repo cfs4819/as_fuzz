@@ -13,12 +13,13 @@ from loguru import logger
 # from common import utils
 # from common.frame import CaseRecorder, FrameElement, FrameEventType, CaseFaultType
 from MS_fuzz.fuzz_config.Config import Config
-from MS_fuzz.ms_utils import calc_relative_loc 
+from MS_fuzz.ms_utils import calc_relative_loc
 from carla_bridge.apollo_carla_bridge import CarlaCyberBridge
 from carla_bridge.utils.logurus import init_log
 from carla_bridge.dreamview_carla import dreamview
 
 from scenario import LocalScenario
+from MS_fuzz.ga_engine.scene_segmentation import SceneSegment
 
 import pdb
 
@@ -63,7 +64,10 @@ class Simulator(object):
         if cfgs.load_bridge:
             self.carla_bridge = CarlaCyberBridge()
 
-        self.local_scenario: LocalScenario = None
+        self.curr_local_scenario: LocalScenario = None
+        self.next_local_scenario: LocalScenario = None
+        self.prev_local_scenario: LocalScenario = None
+        self.scene_segmentation: SceneSegment = None
 
     def carla_bridge_handler(self, ego_spawn_point: dict = None):
         try:
@@ -88,7 +92,7 @@ class Simulator(object):
                 self.carla_world, parameters, logger)
         except (IOError, RuntimeError) as e:
             logger.error(f"[Bridge] Error: {e}")
-        except KeyboardInterrupt as e:
+        except KeyboardInterrupt as e:      # if keyboard signal is catched, this try should be deleted
             logger.error(f"[Bridge] Error: {e}")
         except Exception as e:  # pylint: disable=W0718
             logger.error(e)
@@ -188,8 +192,7 @@ class Simulator(object):
                 time.sleep(2)
         return True
 
-    def run(self):
-
+    def initialization(self):
         now = datetime.now()
         date_time = now.strftime("%m-%d-%Y-%H-%M-%S")
         logger.info(
@@ -201,59 +204,9 @@ class Simulator(object):
         if not self.init_environment():
             return
 
-        # TODO: load initial senario
-        self.local_scenario = LocalScenario(
-            self.carla_world, self.ego_vehicle, logger)
-
-        ego_tf = self.ego_vehicle.get_transform()
-
-        carla_db = self.carla_world.debug
-        carla_db.draw_arrow(begin=calc_relative_loc(ego_tf, 5, 0, 3),
-                            end=calc_relative_loc(ego_tf, 7, 0, 3),
-                            color=carla.Color(255, 0, 0))
-        carla_db.draw_arrow(begin=calc_relative_loc(ego_tf, 5, 0, 3),
-                            end=calc_relative_loc(ego_tf, 5, 2, 3),
-                            color=carla.Color(0, 255, 0))
-
-        self.local_scenario.add_npc_vehicle(start_loc={'x': calc_relative_loc(ego_tf, 5, -8).x,
-                                                       'y': calc_relative_loc(ego_tf, 5, -8).y,
-                                                       'z': 0},
-                                            end_loc={'x': calc_relative_loc(ego_tf, 80, -8).x,
-                                                     'y': calc_relative_loc(ego_tf, 80, -8).y,
-                                                     'z': 0},
-                                            start_time=5,
-                                            behavior_type=0,
-                                            agent_type='normal')
-        self.local_scenario.add_npc_vehicle(start_loc={'x': calc_relative_loc(ego_tf, 12, 0).x,
-                                                       'y': calc_relative_loc(ego_tf, 12, 0).y,
-                                                       'z': 0},
-                                            end_loc={'x': calc_relative_loc(ego_tf, 80, -1).x,
-                                                     'y': calc_relative_loc(ego_tf, 80, -1).y,
-                                                     'z': 0},
-                                            start_time=6,
-                                            behavior_type=0,
-                                            agent_type='normal')
-        self.local_scenario.add_npc_vehicle(start_loc={'x': calc_relative_loc(ego_tf, 22, -2).x,
-                                                       'y': calc_relative_loc(ego_tf, 22, -2).y,
-                                                       'z': 0},
-                                            end_loc={'x': calc_relative_loc(ego_tf, 80, 1).x,
-                                                     'y': calc_relative_loc(ego_tf, 80, 1).y,
-                                                     'z': 0},
-                                            start_time=5,
-                                            behavior_type=0,
-                                            agent_type='normal')
-
-        self.local_scenario.add_npc_vehicle(start_loc={'x': calc_relative_loc(ego_tf, 8, 3).x,
-                                                       'y': calc_relative_loc(ego_tf, 8, 3).y,
-                                                       'z': 0},
-                                            end_loc={'x': calc_relative_loc(ego_tf, 80, 1).x,
-                                                     'y': calc_relative_loc(ego_tf, 80, 1).y,
-                                                     'z': 0},
-                                            start_time=4,
-                                            behavior_type=1,
-                                            agent_type='cautious')
-        self.local_scenario.spawn_all_npcs()
-        # pdb.set_trace()
+        self.scene_segmentation = SceneSegment(
+            self.carla_world, self.ego_vehicle, logger=logger, debug=True)
+        self.scene_segmentation.routing_listener.start()
 
         times = 0
         success = False
@@ -279,6 +232,7 @@ class Simulator(object):
         if not success:
             raise RuntimeError('Fail to spin up apollo')
         dv.set_destination_tranform(self.destination)
+        route_req_time = time.time()
         logger.info(
             '[Simulator] Set Apollo (EGO) destination: ' +
             str(self.destination.location.x) +
@@ -291,38 +245,68 @@ class Simulator(object):
         logger.info(f"[Simulator] World is set to {synchronous_mode_str} mode")
         logger.info(f"[Simulator] Running ...")
 
-        self.local_scenario.scenario_start()
+        self.scene_segmentation.wait_for_route(
+            route_req_time, wait_from_req_time=True)
+        self.scene_segmentation.get_segments(
+            cfg.scenario_length, cfg.scenario_width)
+        self.scene_segmentation.routing_listener.stop()
+
+        dv.disconnect()
+
+    def main_loop(self):
+        dv: dreamview.Connection = dreamview.Connection(
+            self.ego_vehicle,
+            ip=self.cfgs.dreamview_ip,
+            port=str(self.cfgs.dreamview_port))
+
+        print(self.scene_segmentation.get_seg_type(
+            self.scene_segmentation.segments[0], (cfg.scenario_width, cfg.scenario_length)))
+
+        # self.pause_world()
+        # TODO: Load initial senario
+        # self.curr_local_scenario = LocalScenario(
+        #     self.carla_world, self.ego_vehicle, logger)
+
+        # self.scene_segmentation.segments[0]
+
+        # self.curr_local_scenario.scenario_start()
+
+        # self.pause_world(False)
+
         while self.sim_status:
             self.carla_world.wait_for_tick()
-
             # TODO: Load scenario or refresh npcs
-            self.local_scenario.npc_refresh()
+            # self.curr_local_scenario.npc_refresh()
+            self.check_modules(dv)
 
-            module_status = dv.get_module_status()
-            for module, status in module_status.items():
-                if (module not in self.modules or
-                        status):
-                    continue
-                if module == "Prediction" or module == "Planning":
-                    logger.warning('[Simulator] Module is closed: ' +
-                                   module + '==> restrating')
-                    self.carla_bridge.pause_event.set()
-                    dv.enable_apollo(self.destination, self.modules)
-                    dv.set_destination_tranform(self.destination)
-                    if self.restart_module(dv, module):
-                        logger.info('[Simulator] Module: ' +
-                                    module + '==> restrated !')
-                        self.carla_bridge.pause_event.clear()
-                        continue
-                    else:
-                        logger.error('[Simulator] Module is closed: ' +
-                                     module + '==> restrat timeout')
-                        self.sim_status = False
-                        break
-                logger.warning('[Simulator] Module is closed: ' +
-                               module + ' ==> maybe not affect')
+        dv.disconnect()
         self.close()
         logger.info('[Simulator] === Simulation End === ')
+
+    def check_modules(self, dv):
+        module_status = dv.get_module_status()
+        for module, status in module_status.items():
+            if (module not in self.modules or
+                    status):
+                continue
+            if module == "Prediction" or module == "Planning":
+                logger.warning('[Simulator] Module is closed: ' +
+                               module + '==> restrating')
+                self.pause_world()
+                dv.enable_apollo(self.destination, self.modules)
+                dv.set_destination_tranform(self.destination)
+                if self.restart_module(dv, module):
+                    logger.info('[Simulator] Module: ' +
+                                module + '==> restrated !')
+                    self.pause_world(False)
+                    continue
+                else:
+                    logger.error('[Simulator] Module is closed: ' +
+                                 module + '==> restrat timeout')
+                    self.sim_status = False
+                    break
+            logger.warning('[Simulator] Module is closed: ' +
+                           module + ' ==> maybe not affect')
 
     def select_valid_dest(self, radius=100) -> carla.Transform:
         '''
@@ -334,10 +318,6 @@ class Simulator(object):
             des_transform = random.choice(
                 self.carla_map.get_spawn_points())
             distance = ego_curr_point.location.distance(des_transform.location)
-            # distance = math.sqrt(
-            #     (des_location.location.x - ego_curr_point.location.x) ** 2 +
-            #     (des_location.location.y - ego_curr_point.location.y) ** 2
-            # )
             if distance > radius:
                 valid_destination = True
         return des_transform
@@ -357,9 +337,19 @@ class Simulator(object):
             if retry_times <= 0:
                 return False
 
+    def pause_world(self, pause: bool = True):
+        if self.carla_bridge.pause_event == None:
+            return
+        if pause:
+            self.carla_bridge.pause_event.set()
+        else:
+            self.carla_bridge.pause_event.clear()
+
     def close(self):
-        if self.local_scenario:
-            self.local_scenario.remove_all_npcs()
+        if self.scene_segmentation.routing_listener.running:
+            self.scene_segmentation.routing_listener.stop()
+        if self.curr_local_scenario:
+            self.curr_local_scenario.remove_all_npcs()
         if self.cfgs.load_bridge:
             if self.carla_client:
                 self.carla_world = self.carla_client.get_world()
@@ -385,5 +375,6 @@ class Simulator(object):
 if __name__ == "__main__":
     cfg = Config()
     sim = Simulator(cfg)
-    sim.run()
+    sim.initialization()
+    sim.main_loop()
     pdb.set_trace()
