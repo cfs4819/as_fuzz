@@ -71,8 +71,9 @@ class SceneSegment(object):
         self.segments: List[Segment] = []
 
         self.vehicle_pos_listener_thread: threading.Thread = None
-        self.stop_listening_vehicle_pos = False
-        self.stop_listening = False
+
+        self.stop_vehicle_pos_listening = False
+        self.stop_route_listening = False
 
     def phrase_xodr(self):
         for road in self.xodr_root.findall('road'):
@@ -99,63 +100,90 @@ class SceneSegment(object):
     def strat_vehicle_pos_listening(self):
         self.vehicle_pos_listener_thread = threading.Thread(
             target=self.listening_thread)
-        self.stop_listening_vehicle_pos = False
+        self.stop_vehicle_pos_listening = False
         self.vehicle_pos_listener_thread.start()
 
-    def stop_vehicle_pos_listening(self):
-        self.stop_listening_vehicle_pos = True
+    def stop_vehicle_listening(self):
+        self.stop_vehicle_pos_listening = True
         if self.vehicle_pos_listener_thread:
             self.vehicle_pos_listener_thread.join()
 
     def listening_thread(self):
-        last_in_curr = False
-        while not self.stop_listening_vehicle_pos:
+        last_in_index = self.curr_seg_index - 1
+        while not self.stop_vehicle_pos_listening:
             pos = self.ego_vehicle.get_location()
+
+            # have not yet gain segments from routing listener
             if len(self.segments) == 0:
-                # have not yet gain segments from routing listener
                 self.finished_index = -1
                 continue
+
+            # have finished all segments
             if self.finished_index == len(self.segments) - 1:
-                # have finished all segments
                 self.curr_seg_index = len(self.segments) - 1
                 break
+
+            # have not yet reach the first segment
             if self.curr_seg_index < 0:
-                # have not yet reach the first segment
                 self.finished_index = -1
                 # wait until reach the first segment
                 while not self.check_if_loc_in_segment(pos, self.segments[0]):
                     pos = self.ego_vehicle.get_location()
-                    if self.stop_listening_vehicle_pos:
+                    if self.stop_vehicle_pos_listening:
                         break
                 # now reached the first segment
                 self.curr_seg_index = 0
-                last_in_curr = True
+                last_in_index = self.curr_seg_index
                 continue
-            in_curr = self.check_if_loc_in_segment(
-                pos, self.segments[self.curr_seg_index])
-            in_next = False
-            if self.finished_index < len(self.segments) - 2:
-                in_next = self.check_if_loc_in_segment(
-                    pos, self.segments[self.curr_seg_index + 1])
-            self.belongs_to_two_index = (in_curr, in_next)
-            if in_curr == last_in_curr:
-                if in_next and not in_curr:
-                    # [ ] *[ ] ->[ ] [* ]
-                    self.finished_index = self.curr_seg_index
-                    self.curr_seg_index += 1
-                    last_in_curr = in_next
-                continue
+
+            is_in_list = []
+            already_in_list = []
+            for index, seg in enumerate(self.segments):
+                is_in = self.check_if_loc_in_segment(pos,seg)
+                is_in_list.append(is_in)
+                if is_in:
+                    already_in_list.append(index)
+            
+            if already_in_list != []:
+                self.curr_seg_index = already_in_list[0]
+                if self.curr_seg_index != last_in_index:
+                    self.finished_index = last_in_index
+                    last_in_index = self.curr_seg_index
+                if len(already_in_list) > 1:
+                    self.belongs_to_two_index = (True, True)
+                else:
+                    self.belongs_to_two_index = (True, False)
             else:
-                if in_curr and in_next:
-                    # [ [*] ] -> [ []* ]
+                self.belongs_to_two_index = (False, False)
+                if last_in_index == self.curr_seg_index:
                     self.finished_index = self.curr_seg_index
-                    self.curr_seg_index += 1
-                    last_in_curr = in_next
-                if not in_curr and not in_next:
-                    # [ *] [ ] -> [ ]* [ ]
-                    self.finished_index = self.curr_seg_index
-                last_in_curr = in_curr
-                continue
+            
+           
+            # in_curr = self.check_if_loc_in_segment(
+            #     pos, self.segments[self.curr_seg_index])
+            # in_next = False
+            # if self.finished_index < len(self.segments) - 2:
+            #     in_next = self.check_if_loc_in_segment(
+            #         pos, self.segments[self.curr_seg_index + 1])
+            # self.belongs_to_two_index = (in_curr, in_next)
+            # if in_curr == last_in_curr:
+            #     if in_next and not in_curr:
+            #         # [ ] *[ ] ->[ ] [* ]
+            #         self.finished_index = self.curr_seg_index
+            #         self.curr_seg_index += 1
+            #         last_in_curr = in_next
+            #     continue
+            # else:
+            #     if in_curr and in_next:
+            #         # [ [*] ] -> [ []* ]
+            #         self.finished_index = self.curr_seg_index
+            #         self.curr_seg_index += 1
+            #         last_in_curr = in_next
+            #     if not in_curr and not in_next:
+            #         # [ *] [ ] -> [ ]* [ ]
+            #         self.finished_index = self.curr_seg_index
+            #     last_in_curr = in_curr
+            #     continue
 
     def check_if_loc_in_segment(self, pos: carla.Location, seg: Segment):
         dx = pos.x - seg.location.x
@@ -202,17 +230,17 @@ class SceneSegment(object):
             else:
                 return ('straight_-1way_-1lane')
     def wait_for_route(self, req_time, interval=-2, wait_from_req_time=False):
-        self.stop_listening = False
+        self.stop_route_listening = False
         if wait_from_req_time:
             while self.routing_listener.req_time == None or \
                     (self.routing_listener.req_time - req_time) <= interval:
-                if self.stop_listening == True:
+                if self.stop_route_listening == True:
                     break
                 time.sleep(0.1)
         else:
             while self.routing_listener.recv_time == None or \
                     (self.routing_listener.recv_time - req_time) <= interval:
-                if self.stop_listening == True:
+                if self.stop_route_listening == True:
                     break
                 time.sleep(0.1)
 
@@ -349,7 +377,7 @@ if __name__ == '__main__':
 
     def signal_handler(sig, frame):
         SS.routing_listener.stop()
-        SS.stop_listening = True
+        SS.stop_route_listening = True
         exit()
 
     signal.signal(signal.SIGINT, signal_handler)

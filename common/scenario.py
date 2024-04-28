@@ -2,9 +2,10 @@ import copy
 import random
 import threading
 import numpy as np
+import math
 import carla
 import time
-from typing import List
+from typing import List, Dict
 
 import pdb
 
@@ -16,7 +17,9 @@ from MS_fuzz.ga_engine.gene import *
 from agents.navigation.behavior_agent import BehaviorAgent
 from MS_fuzz.ga_engine.scene_segmentation import Segment
 from MS_fuzz.ms_utils import calc_relative_loc, calc_relative_loc_dict
+from MS_fuzz.ms_utils import get_crosswalk_list, is_point_in_any_crosswalk
 from MS_fuzz.ga_engine.gene import GeneNpcWalkerList, GeneNpcVehicleList
+from MS_fuzz.common.evaluate import Evaluate_Object
 
 
 class NpcBase(object):
@@ -62,7 +65,7 @@ class NpcVehicle(NpcBase):
         self.behavior_type: int = behavior_type  # 0: driving, 1: starting, 2: parked
         self.agent_type: str = agent_type
         self.agent: BehaviorAgent = None
-        self.vehicle = None  # the actor object
+        self.vehicle: carla.Vehicle = None  # the actor object
         self.vehicle_id: str = vehicle_id
         self.start_speed: float = start_speed
 
@@ -82,7 +85,7 @@ class NpcWalker(NpcBase):
             blueprint=blueprint,
             start_time=start_time
         )
-        self.walker = None  # the actor object
+        self.walker: carla.Walker = None  # the actor object
         self.max_speed = max_speed
         self.behavior_type: int = behavior_type  # 0: walking, 1: stoped
         self.ai_controller: carla.WalkerAIController = None
@@ -111,7 +114,7 @@ class LocalScenario(object):
         self.id = ''
         self.scen_seg: Segment = None
         self.logger = logger
-        self.ego = ego_vhicle  # dict
+        self.ego: carla.Vehicle = ego_vhicle
         self.carla_world: carla.World = carla_world
         self.carla_map: carla.Map = self.carla_world.get_map()
 
@@ -120,6 +123,9 @@ class LocalScenario(object):
         # init npc para
         self.npc_vehicle_list: List[NpcVehicle] = []
         self.npc_walker_list: List[NpcWalker] = []
+
+        self.sce_obj_2_carla_actor_id: Dict[str, int] = {
+            'ego_vehicle': self.ego.id}
 
         # environment
         self.environment = None
@@ -140,6 +146,22 @@ class LocalScenario(object):
 
         self.vehicle_count = 0
         self.walker_count = 0
+
+        self.evaluate_obj: Evaluate_Object = None
+        self.crosswalk_list = get_crosswalk_list(
+            self.carla_map.get_crosswalks())
+
+    def attach_segment(self, segment: Segment):
+        self.scen_seg = segment
+
+
+    def add_npcs_from_evaluate_obj(self, obj: Evaluate_Object):
+        if self.scen_seg is None:
+            self.logger.error('attach segment before adding npcs')
+            return
+        self.add_npc_vehicles_form_gene(obj.vehicle_ind)
+        self.add_npc_walkers_form_gene(obj.walker_ind)
+        self.evaluate_obj = obj
 
     def add_npc_walkers_form_gene(self, gene: GeneNpcWalkerList):
         base_ref = carla.Transform(
@@ -360,10 +382,12 @@ class LocalScenario(object):
             if vehicle.vehicle == None:
                 logger.warning(
                     f"Vehicle spawned failed: id is {vehicle.vehicle_id}")
+                self.sce_obj_2_carla_actor_id[vehicle.vehicle_id] = -1
                 continue
             vehicle.spawned = True
             logger.info(
                 f"Vehicle spawned: id is {vehicle.vehicle_id}")
+            self.sce_obj_2_carla_actor_id[vehicle.vehicle_id] = vehicle.vehicle.id
             if vehicle.behavior_type == 2:
                 # is a parked vehicle
                 continue
@@ -383,8 +407,10 @@ class LocalScenario(object):
             if walker.walker == None:
                 logger.warning(
                     f"Walker spawned failed: id is {walker.walker_id}")
+                self.sce_obj_2_carla_actor_id[walker.walker_id] = -1
                 continue
             walker.spawned = True
+            self.sce_obj_2_carla_actor_id[walker.walker_id] = walker.walker.id
             if walker.behavior_type == 1:
                 continue
             walker_controller_bp = self.world_blueprint.find(
@@ -416,12 +442,17 @@ class LocalScenario(object):
         for walker in self.npc_walker_list:
             if walker.behavior_type == 1:
                 continue
-            walker.close_event = threading.Thread()
+            walker.close_event = threading.Event()
             walker.control_thread = threading.Thread(
                 target=self.walker_control_handler,
                 args=(walker, ),
                 name=f"thread_{walker.walker_id}")
             walker.control_thread.start()
+
+    def scenario_end(self):
+        self.remove_all_npcs()
+        if self.evaluate_obj:
+            self.evaluate_obj.evaluate()
 
     def vehicle_control_handler(self, vehicle: NpcVehicle):
         while not vehicle.close_event.is_set():
@@ -541,14 +572,15 @@ class LocalScenario(object):
         for vehicle in self.npc_vehicle_list:
             if vehicle.vehicle:
                 vehicle.vehicle.destroy()
-            self.npc_vehicle_list.remove(vehicle)
-
+            # self.npc_vehicle_list.remove(vehicle)
+        self.npc_vehicle_list = []
         for walker in self.npc_walker_list:
             if walker.ai_controller:
                 walker.ai_controller.destroy()
             if walker.walker:
                 walker.walker.destroy()
-            self.npc_walker_list.remove(walker)
+            # self.npc_walker_list.remove(walker)
+        self.npc_walker_list = []
         self.carla_world.wait_for_tick()
 
     def npc_refresh(self):
@@ -557,7 +589,6 @@ class LocalScenario(object):
         '''
         with self.refresh_condition:
             self.refresh_condition.notify_all()
-        pass
 
     def refresh_blueprint(self, world: carla.World):
         self.world_blueprint = world.get_blueprint_library()
@@ -574,3 +605,57 @@ class LocalScenario(object):
             'base_type') == "motorcycle"]
         self.vehicle_bycicle_bps = [bp for bp in self.vehicle_blueprint if bp.get_attribute(
             'base_type') == "bycicle"]
+
+    def evaluate_snapshot_record(self, world_snapshot: carla.WorldSnapshot):
+        '''
+            1. for all individuals:
+                f_distance: the minimum distance between ego and other npcs during the simulation time t
+                f_smooth : represents the ego vehicle's acceleration during a scene
+                f_diversity: diversity of the scene
+            2. for npc_walkers:
+                f_crossing_time : Time taken to cross the road
+            3. for npc_vehicles:s
+                f_interaction_rate: the rate at which vehicles interact with the ego vehicle
+        '''
+        frame = world_snapshot.frame
+        ego_ss = world_snapshot.find(self.ego.id)
+        npc_vehicles_ss = []
+        for vehicle in self.npc_vehicle_list:
+            npc_vehicles_ss.append(world_snapshot.find(vehicle.id))
+        npc_walkers_ss = []
+        for walker in self.npc_walker_list:
+            npc_walkers_ss.append(world_snapshot.find(walker.id))
+
+        min_dis = 9999
+        for npc in npc_vehicles_ss + npc_walkers_ss:
+            dis = ego_ss.get_transform().location.distance(npc.get_transform().location)
+            if dis < min_dis:
+                min_dis = dis
+
+        unsmooth_acc = 0 if (abs(ego_ss.get_acceleration.x) < 4) else (
+            abs(ego_ss.get_acceleration.x) - 4)
+
+        walker_in_road = 0
+        for walker in npc_vehicles_ss:
+            if is_point_in_any_crosswalk(walker.get_transform().location, self.crosswalk_list):
+                walker_in_road += 1
+
+        frame_record = {
+            'frame': frame,
+            'min_dis': min_dis,
+            'unsmooth_acc': unsmooth_acc,
+            'walker_in_road': walker_in_road,
+            'npc_vehicles_ss': npc_vehicles_ss,
+            'ego_ss': ego_ss
+        }
+
+        self.evaluate_obj.frame_recorded.append(frame_record)
+
+        # caculate later
+        # vehicle_may_collide = 0
+        # for vehicle in npc_vehicles_ss:
+        #     collision, c_t = self.predict_collision(vehicle, ego_ss)
+        #     if collision:
+        #         vehicle_may_collide += 1
+
+    
