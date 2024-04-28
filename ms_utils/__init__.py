@@ -65,3 +65,43 @@ def rotate_point(x, y, angle_degrees):
     x_new = x * cos_angle - y * sin_angle
     y_new = x * sin_angle + y * cos_angle
     return x_new, y_new
+
+
+def get_crosswalk_list(locs: List[carla.Location]):
+    crosswalk_list = []
+    i = 0
+    while i < len(locs):
+        j = i + 1
+        this_crosswalk = [locs[i]]
+        while locs[i] != locs[j]:
+            this_crosswalk.append(locs[j])
+            j += 1
+            if j == len(locs):
+                break
+        crosswalk_list.append(this_crosswalk)
+        i = j + 1
+    return crosswalk_list
+
+
+def is_point_in_crosswalk(point: carla.Location, crosswalk: List[carla.Location]):
+    x, y = point.x, point.y
+    n = len(crosswalk)
+    inside = False
+
+    p1x, p1y = crosswalk[0]
+    for i in range(n + 1):
+        p2x, p2y = crosswalk[i % n].x, crosswalk[i % n].y
+        if y > min(p1y, p2y):
+            if y <= max(p1y, p2y):
+                if x <= max(p1x, p2x):
+                    if p1y != p2y:
+                        xinters = (y - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
+                    if p1x == p2x or x <= xinters:
+                        inside = not inside
+        p1x, p1y = p2x, p2y
+
+    return inside
+
+
+def is_point_in_any_crosswalk(point: carla.Location, crosswalk_list: List[List[carla.Location]]):
+    return any(is_point_in_crosswalk(point, crosswalk) for crosswalk in crosswalk_list)

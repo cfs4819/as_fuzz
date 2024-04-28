@@ -1,9 +1,16 @@
 import random
 from deap import base, creator, tools, algorithms
+from typing import List
 
-from gene import *
 from copy import deepcopy
+
+from MS_fuzz.common.evaluate import Evaluate_Object
+from MS_fuzz.ga_engine.gene import *
 from MS_fuzz.fuzz_config.Config import Config
+
+import threading
+import queue
+import time
 
 
 class CEGA:
@@ -19,13 +26,16 @@ class CEGA:
         self.scene_length = cfgs.scenario_length
         self.scene_width = cfgs.scenario_width
 
-        self.type = 'straight'  # straight, junction
-        self.lane_num = 4
-        self.junction_direction_num = 4
+        self.type_str = 'straight'  # straight, junctio
 
-        self.evaluate_list = []
+        self.evaluate_list: List[Evaluate_Object] = []
 
-    def evaluate(self,):
+        self.running = False
+
+        self.main_thread: threading.Thread = None
+        self.stop_event: threading.Event = None
+
+    def evaluate(self, walker_ind: GeneNpcWalkerList, vehicle_ind: GeneNpcVehicleList):
         '''
         TODO:
             1. Target:
@@ -40,8 +50,15 @@ class CEGA:
             4. for npc_vehicles:s
                 f_interaction_rate: the rate at which vehicles interact with the ego vehicle
         '''
+        evaluate_obj = Evaluate_Object(walker_ind, vehicle_ind)
 
-        pass
+        self.evaluate_list.append(evaluate_obj)
+
+        while not self.stop_event.is_set():
+            # wait for result
+            if evaluate_obj.is_evaluated:
+                return evaluate_obj.fitness
+        return -1, -1, -1, -1, -1
 
     def mate_walkers(self, ind1: GeneNpcWalkerList, ind2: GeneNpcWalkerList):
         offspring = GeneNpcWalkerList
@@ -113,7 +130,8 @@ class CEGA:
         # add a random agent, p = 0.3
         elif ((mut_pb <= 0.2 + 0.3 and len(ind.list) < ind.max_walker_count) or
               len(ind.list) < 1):
-            ind.list.append(ind.get_a_new_agent())
+            ind.list.append(ind.get_a_new_agent(
+                self.scene_width, self.scene_length))
             return ind
 
         # mutate a random agent, p = 0.5
@@ -150,7 +168,8 @@ class CEGA:
         # add a random vehicle, p = 0.3
         elif ((mut_pb <= 0.2 + 0.3 and len(ind.list) < ind.max_walker_count) or
               len(ind.list) < 1):
-            ind.list.append(ind.get_a_new_agent())
+            ind.list.append(ind.get_a_new_agent(self.scene_width,
+                                                self.scene_length))
             return ind
 
         # mutate a random agent, p = 0.5
@@ -198,9 +217,21 @@ class CEGA:
 
             return ind
 
+    def start(self):
+        self.main_thread = threading.Thread(target=self.main_progress)
+        self.stop_event = threading.Event()
+        self.stop_event.clear()
+        self.main_thread.start()
+        self.running = True
+
+    def stop(self):
+        self.stop_event.set()
+        self.main_thread.join()
+        self.running = False
+
     def main_progress(self):
         if self.logger:
-            self.logger.info("Start GA:")
+            self.logger.info(f"Start GA {self.type_str}:")
 
         # GA Hyperparameters
         POP_SIZE = 10   # number of population
@@ -220,8 +251,10 @@ class CEGA:
         tb_vehicles.register('mutate', self.mutate_vehicles)
         tb_vehicles.register('select', tools.selNSGA2)
 
-        pop_walkers = [get_new_walker_ind() for _ in range(POP_SIZE)]
-        pop_vehicles = [get_new_vehicle_ind() for _ in range(POP_SIZE)]
+        pop_walkers: List[GeneNpcWalkerList] = [
+            get_new_walker_ind() for _ in range(POP_SIZE)]
+        pop_vehicles: List[GeneNpcVehicleList] = [
+            get_new_vehicle_ind() for _ in range(POP_SIZE)]
 
         for index, c in enumerate(pop_walkers):
             c.id = f'gen_0_ind_{index}'
@@ -235,30 +268,22 @@ class CEGA:
         if self.logger:
             self.logger.info(f' ====== Analyzing Initial Population ====== ')
 
-        for index in range(POP_SIZE):
-            walker_ind = pop_walkers[index]
-            vehicle_ind = pop_vehicles[index]
-
-            # only those individuals with invalid fitness need to be evaluated
-            if walker_ind.fitness.valid and vehicle_ind.fitness.valid:
-                continue
-
-            # or add them to evaluate list
-            total_fitness = self.evaluate(walker_ind, vehicle_ind)
-            walker_ind.fitness.values = total_fitness[0]
-            vehicle_ind.fitness.values = total_fitness[1]
+        # TODO: add inds to evaluate list
+        self.evaluate_pop(pop_walkers, pop_vehicles)
 
         hof_walkers.update(pop_walkers)
         hof_vehicles.update(pop_vehicles)
 
         for gen in range(1, self.max_generation):
+            if self.stop_event.is_set():
+                return
             if self.logger:
                 self.logger.info(f"Generation #{gen}. Start:")
 
             # Vary the population
-            offspring_walkers = algorithms.varOr(
+            offspring_walkers: List[GeneNpcWalkerList] = algorithms.varOr(
                 pop_walkers, tb_walkers, OFF_SIZE, CXPB, MUTPB)
-            offspring_vehicles = algorithms.varOr(
+            offspring_vehicles: List[GeneNpcVehicleList] = algorithms.varOr(
                 pop_vehicles, tb_vehicles, OFF_SIZE, CXPB, MUTPB)
 
             for index, c in enumerate(offspring_walkers):
@@ -267,18 +292,7 @@ class CEGA:
                 c.id = f'gen_{gen}_ind_{index}'
 
             # Evaluate the individuals with an invalid fitness
-            for index in range(OFF_SIZE):
-                walker_ind = offspring_walkers[index]
-                vehicle_ind = offspring_vehicles[index]
-
-                # only those individuals with invalid fitness need to be evaluated
-                if walker_ind.fitness.valid and vehicle_ind.fitness.valid:
-                    continue
-
-                # or add them to evaluate list
-                total_fitness = self.evaluate(walker_ind, vehicle_ind)
-                walker_ind.fitness.values = total_fitness[0]
-                vehicle_ind.fitness.values = total_fitness[1]
+            self.evaluate_pop(offspring_walkers, offspring_vehicles)
 
             hof_walkers.update(offspring_walkers)
             hof_vehicles.update(offspring_vehicles)
@@ -288,3 +302,53 @@ class CEGA:
                 pop_walkers + offspring_walkers, POP_SIZE)
             pop_vehicles[:] = tb_vehicles.select(
                 pop_vehicles + offspring_vehicles, POP_SIZE)
+
+    def evaluate_pop(self, pop_walkers: List[GeneNpcWalkerList],
+                     pop_vehicles: List[GeneNpcVehicleList]):
+        pop_size = len(pop_walkers) if len(pop_walkers) < len(
+            pop_vehicles) else len(pop_vehicles)
+
+        for index in range(pop_size):
+            walker_ind = pop_walkers[index]
+            vehicle_ind = pop_vehicles[index]
+
+            # only those individuals with invalid fitness need to be evaluated
+            if walker_ind.fitness.valid and vehicle_ind.fitness.valid:
+                continue
+
+            # or add them to evaluate list
+            if self.stop_event.is_set():
+                # save if needed
+                return
+
+            evaluate_obj = Evaluate_Object(walker_ind, vehicle_ind)
+            self.evaluate_list.append(evaluate_obj)
+
+        # wait until all evaluate_obj are evaluated
+        all_evaluated = False
+        while not all_evaluated:
+            all_evaluated = True
+            for obj in self.evaluate_list:
+                if not obj.is_evaluated:
+                    all_evaluated = False
+                    break
+            if not all_evaluated:
+                time.sleep(0.01)
+            if self.stop_event.is_set():
+                break
+
+        # reset self.evaluate_list after all evaluated
+        self.evaluate_list.clear()
+
+    def get_an_unevaluated_obj(self):
+        while len(self.evaluate_list) == 0:
+            if self.stop_event.is_set():
+                return None
+            time.sleep(0.01)
+        for obj in self.evaluate_list:
+            if not obj.is_evaluated:
+                return obj
+        return None
+
+    def save(self):
+        pass
