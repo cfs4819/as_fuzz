@@ -96,7 +96,8 @@ class ApolloRoutingListener:
                     self.routing_wps.append([lane_wp_s, lane_wp_e])
         if self.debug:
             if self.logger != None:
-                self.logger.info(f"waypoints:{self.routing_wps}")
+                # self.logger.info(f"waypoints:{self.routing_wps}")
+                self.logger.info(f"Recvs waypoints:{len(self.routing_wps)}")
             self.draw_routing_wps()
 
     def draw_routing_wps(self):
