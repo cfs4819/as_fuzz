@@ -8,6 +8,7 @@ import math
 # import pygame
 
 from datetime import datetime
+from typing import Dict
 from loguru import logger
 
 # from common import utils
@@ -20,6 +21,7 @@ from carla_bridge.dreamview_carla import dreamview
 
 from scenario import LocalScenario
 from MS_fuzz.ga_engine.scene_segmentation import SceneSegment
+from MS_fuzz.ga_engine.cega import CEGA
 
 import pdb
 
@@ -68,6 +70,10 @@ class Simulator(object):
         self.next_local_scenario: LocalScenario = None
         self.prev_local_scenario: LocalScenario = None
         self.scene_segmentation: SceneSegment = None
+
+        self.ga_lib: Dict[str, CEGA] = {}
+
+        self.close_event = threading.Event()
 
     def carla_bridge_handler(self, ego_spawn_point: dict = None):
         try:
@@ -251,6 +257,8 @@ class Simulator(object):
             cfg.scenario_length, cfg.scenario_width)
         self.scene_segmentation.routing_listener.stop()
 
+        self.scene_segmentation.strat_vehicle_pos_listening()
+
         dv.disconnect()
 
     def main_loop(self):
@@ -259,29 +267,79 @@ class Simulator(object):
             ip=self.cfgs.dreamview_ip,
             port=str(self.cfgs.dreamview_port))
 
-        print(self.scene_segmentation.get_seg_type(
-            self.scene_segmentation.segments[0], (cfg.scenario_width, cfg.scenario_length)))
-
-        # self.pause_world()
-        # TODO: Load initial senario
-        # self.curr_local_scenario = LocalScenario(
-        #     self.carla_world, self.ego_vehicle, logger)
-
-        # self.scene_segmentation.segments[0]
-
-        # self.curr_local_scenario.scenario_start()
-
-        # self.pause_world(False)
-
-        while self.sim_status:
+        print('scene_segmentation.curr_seg_index',
+              self.scene_segmentation.curr_seg_index)
+        print('waitting until the vehicle reach the first segment')
+        # wait until the vehicle reach first segment
+        while (self.scene_segmentation.curr_seg_index < 0):
+            if self.close_event.is_set():
+                return
             self.carla_world.wait_for_tick()
-            # TODO: Load scenario or refresh npcs
-            # self.curr_local_scenario.npc_refresh()
             self.check_modules(dv)
+
+        self.curr_local_scenario = LocalScenario(
+            self.carla_world, self.ego_vehicle, logger)
+        self.curr_local_scenario.id = str(self.scene_segmentation.curr_seg_index)
+
+        self.load_scenario(self.curr_local_scenario,
+                           self.scene_segmentation.curr_seg_index)
+
+        self.curr_local_scenario.scenario_start()
+        curr_index = self.scene_segmentation.curr_seg_index
+        while curr_index != self.scene_segmentation.finished_index:
+            if not self.sim_status:
+                break
+            if self.close_event.is_set():
+                break
+            self.carla_world.wait_for_tick()
+            world_ss = self.carla_world.get_snapshot()
+            self.curr_local_scenario.npc_refresh()
+            self.curr_local_scenario.evaluate_snapshot_record(world_ss)
+            self.check_modules(dv)
+        self.curr_local_scenario.scenario_end()
 
         dv.disconnect()
         self.close()
         logger.info('[Simulator] === Simulation End === ')
+
+    def load_scenario(self, scenario_2_load: LocalScenario, seg_index):
+        seg_type = self.scene_segmentation.get_seg_type(
+            self.scene_segmentation.segments[seg_index],
+            (cfg.scenario_width, cfg.scenario_length))
+        cega = self.ga_lib.get(seg_type)
+        if cega == None:
+            # Start a new GA and wait for a individual
+            cega = CEGA(cfg, logger=logger)
+            cega.type_str = seg_type
+            cega.start()
+            # store in lib
+            self.ga_lib[seg_type] = cega
+            timeout = 2
+            if len(cega.evaluate_list) == 0:
+                logger.info('Waitting for first individual')
+                while len(cega.evaluate_list) == 0:
+                    time.sleep(0.01)
+                    timeout -= 0.01
+                    if self.close_event.is_set():
+                        return
+                    if timeout <= 0:
+                        logger.error('Waitting Timeout')
+                        self.close()
+                        return
+
+            logger.info(f'CEGA {seg_type} individual gained')
+        obj_2_evaluate = cega.get_an_unevaluated_obj()
+        if obj_2_evaluate == None:
+            logger.info('No individual to evaluate, Vehicles roam freely')
+            return False
+
+        # Now we can load this scenario
+        # scenario_2_load.id = str(seg_index)
+        scenario_2_load.attach_segment(
+            self.scene_segmentation.segments[seg_index])
+        scenario_2_load.add_npcs_from_evaluate_obj(obj_2_evaluate)
+        scenario_2_load.spawn_all_npcs()
+        return True
 
     def check_modules(self, dv):
         module_status = dv.get_module_status()
@@ -346,8 +404,10 @@ class Simulator(object):
             self.carla_bridge.pause_event.clear()
 
     def close(self):
+        self.close_event.set()
         if self.scene_segmentation.routing_listener.running:
             self.scene_segmentation.routing_listener.stop()
+        self.scene_segmentation.stop_vehicle_listening()
         if self.curr_local_scenario:
             self.curr_local_scenario.remove_all_npcs()
         if self.cfgs.load_bridge:
