@@ -95,14 +95,13 @@ class NpcWalker(NpcBase):
 class LocalScenario(object):
 
     '''
-
         # Run as follow step:
-            1. add npcs into npc list by add_npc_vehicle() or add_npc_walker()
-            2. spawn npcs by spawn_all_npcs()
-            3. start running by scenario_start()
-            4. tick the scenario repeatedly by npc_refresh()
-            5. stop all running walkers & vehicles by stop_all_npcs()
-            6. remove all of them from the scenario by remove_all_npcs()
+            1. add npcs into npc list by `add_npc_vehicle()` or `add_npc_walker()`
+            2. spawn npcs by `spawn_all_npcs()`
+            3. start running by `scenario_start()`
+            4. tick the scenario repeatedly by `npc_refresh()`
+            5. stop all running walkers & vehicles by `stop_all_npcs()`
+            6. remove all of them from the scenario by `remove_all_npcs()`
 
 
     '''
@@ -153,7 +152,6 @@ class LocalScenario(object):
 
     def attach_segment(self, segment: Segment):
         self.scen_seg = segment
-
 
     def add_npcs_from_evaluate_obj(self, obj: Evaluate_Object):
         if self.scen_seg is None:
@@ -457,12 +455,13 @@ class LocalScenario(object):
     def vehicle_control_handler(self, vehicle: NpcVehicle):
         while not vehicle.close_event.is_set():
             with self.refresh_condition:
+                self.refresh_condition.wait()
+                if vehicle.close_event.is_set():
+                    break
                 # 1. wait until vehicle can run
-                while (not vehicle.is_running and
-                       not vehicle.reached_destination and
-                       not vehicle.close_event.is_set()
-                       ):
-                    self.refresh_condition.wait()
+                if (not vehicle.is_running and
+                    not vehicle.close_event.is_set()
+                    ):
                     # Check if it's time for this vehicle to run
                     curr_time = self.carla_world.get_snapshot().timestamp
                     time_passed = curr_time.elapsed_seconds - \
@@ -477,10 +476,8 @@ class LocalScenario(object):
                     break
 
                 # 2. Once the vehicle starts running, wait for refresh signal from main thread
-                while (vehicle.is_running and
-                       not vehicle.reached_destination and
-                       not vehicle.close_event.is_set()):
-                    self.refresh_condition.wait()
+                elif (vehicle.is_running and
+                      not vehicle.close_event.is_set()):
 
                     # Apply control to the vehicle
                     ctrl = vehicle.agent.run_step(debug=True)
@@ -489,11 +486,10 @@ class LocalScenario(object):
                     # print(f"Controlling {vehicle.vehicle_id}, at {vehicle.agent}")
 
                     if vehicle.agent.done():
+                        # finished, close the thread
                         vehicle.reached_destination = True
                         vehicle.is_running = False
-                        break
-                if vehicle.close_event.is_set():
-                    break
+                        return
 
         # If close_event is set, stop the vehicle
         vehicle.vehicle.apply_control(vehicle.agent.emergency_stop())
@@ -502,11 +498,11 @@ class LocalScenario(object):
     def walker_control_handler(self, walker: NpcWalker):
         while not walker.close_event.is_set():
             with self.refresh_condition:
+                self.refresh_condition.wait()
+                if walker.close_event.is_set():
+                    break
                 # 1. wait until walker can run
-                while (not walker.is_running and not walker.close_event.is_set()):
-                    self.refresh_condition.wait()
-                    if walker.close_event.is_set():
-                        break
+                if (not walker.is_running and not walker.close_event.is_set()):
                     # Check if it's time for this walker to run
                     curr_time = self.carla_world.get_snapshot().timestamp
                     time_passed = curr_time.elapsed_seconds - \
@@ -519,31 +515,11 @@ class LocalScenario(object):
                         walker.ai_controller.go_to_location(
                             walker.end_loc.location)
                         walker.ai_controller.set_max_speed(walker.max_speed)
-                    walker.is_running = True
+                        walker.is_running = True
 
-        # time to close
-        if walker.ai_controller:
-            walker.is_running = False
-            walker.ai_controller.stop()
-
-        while not walker.close_event.is_set():
-            with self.refresh_condition:
-                self.refresh_condition.wait()
-                if walker.is_running:
-                    # check if walker has been running
+                # 2.running, nothing we can do
+                else:
                     pass
-                curr_time = self.carla_world.get_snapshot().timestamp
-                time_passed = curr_time.elapsed_seconds - \
-                    self.scenario_start_time.elapsed_seconds
-                if time_passed >= walker.start_time:
-                    # is time that this walker can run
-                    if walker.behavior_type == 0 and walker.ai_controller != None:
-                        walker.ai_controller.start()
-                        walker.ai_controller.go_to_location(
-                            walker.end_loc.location)
-                        walker.ai_controller.set_max_speed(walker.max_speed)
-                    walker.is_running = True
-                continue
 
         # time to close
         if walker.ai_controller:
@@ -557,6 +533,9 @@ class LocalScenario(object):
             for agent in agent_list:
                 if agent.control_thread and agent.close_event:
                     agent.close_event.set()
+                with self.refresh_condition:
+                    self.refresh_condition.notify_all()
+                    self.refresh_condition.notify_all()
 
         # make sure all agent threads can finish
         with self.refresh_condition:
@@ -657,5 +636,3 @@ class LocalScenario(object):
         #     collision, c_t = self.predict_collision(vehicle, ego_ss)
         #     if collision:
         #         vehicle_may_collide += 1
-
-    
