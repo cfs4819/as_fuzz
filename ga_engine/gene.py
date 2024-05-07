@@ -54,7 +54,7 @@ class VehicleListFitness(base.Fitness):
 
 
 class GeneNpcWalkerList:
-    def __init__(self, id='', list: List[GeneNpcWalker] = [], max_count: int = 20):
+    def __init__(self, id='', list: List[GeneNpcWalker] = [], max_count: int = 10):
         self.id = id  # gen_{}
         self.list: List[GeneNpcWalker] = list
 
@@ -84,7 +84,7 @@ class GeneNpcWalkerList:
 
 
 class GeneNpcVehicleList:
-    def __init__(self, id='', list: List[GeneNpcVehicle] = [], max_count: int = 20):
+    def __init__(self, id='', list: List[GeneNpcVehicle] = [], max_count: int = 10):
         self.id = id
         self.list: List[GeneNpcVehicle] = list
 

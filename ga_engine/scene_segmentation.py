@@ -51,9 +51,10 @@ class SceneSegment(object):
         self.finished_index = -1
         self.curr_seg_index = -1
         self.belongs_to_two_index = (True, False)
-        # normal: [ *] [ ]; between: [ [*] ]; neither: [ ]*[ ]
-        #         ↑                  ↑                 ↑
-        #         curr_index         curr_index        curr_index
+        # | normal: [ *] [ ];     | between: [ [*] ];       | neither: [ ]*[ ]         |
+        # |         ↑             |          ↑              |          ↑               |
+        # |         curr_index    |          curr_index     |          curr_index      |
+        # |    (True, False)      |       (True, True)      |     (False, False)       |
 
         self.phrase_xodr()
         # print(self.map_roads)

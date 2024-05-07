@@ -43,7 +43,12 @@ class Evaluate_Object:
         # frame_start = self.frame_recorded[0]['frame']
         # frame_end = self.frame_recorded[-1]['frame']
         # frame_duration = frame_end - frame_start + 1
+        if not self.frame_recorded or len(self.frame_recorded) == 0:
 
+            self.walker_ind.fitness = (0, 0, 0, 0)
+            self.vehicle_ind.fitness = (0, 0, 0, 0)
+            self.is_evaluated = True
+            return
         f_distance = self.frame_recorded[0]['min_distance']
         f_unsmooth_acc = self.frame_recorded[0]['unsmooth_acc']
 

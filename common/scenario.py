@@ -145,6 +145,7 @@ class LocalScenario(object):
 
         self.vehicle_count = 0
         self.walker_count = 0
+        self.running: bool = False
 
         self.evaluate_obj: Evaluate_Object = None
         self.crosswalk_list = get_crosswalk_list(
@@ -346,7 +347,9 @@ class LocalScenario(object):
             project_to_road=True,
             lane_type=carla.LaneType.Sidewalk
         )
-        start_waypoint.transform.location.z += 1.5
+
+        start_waypoint_tf = start_waypoint.transform
+        start_waypoint_tf.location.z += 2.5
 
         end_waypoint = self.carla_map.get_waypoint(
             carla.Location(x=end_loc['x'],
@@ -362,7 +365,7 @@ class LocalScenario(object):
             self.walker_count = self.walker_count + 1
             walker_id = f'npc_walker_{self.walker_count}'
 
-        self.npc_walker_list.append(NpcWalker(start_loc=start_waypoint.transform,
+        self.npc_walker_list.append(NpcWalker(start_loc=start_waypoint_tf,
                                               end_loc=end_waypoint.transform,
                                               blueprint=blueprint,
                                               start_time=start_time,
@@ -376,7 +379,7 @@ class LocalScenario(object):
         for vehicle in self.npc_vehicle_list:
             vehicle.vehicle = self.carla_world.try_spawn_actor(vehicle.blueprint,
                                                                vehicle.start_loc)
-            self.carla_world.wait_for_tick()
+            # self.carla_world.wait_for_tick()
             if vehicle.vehicle == None:
                 logger.warning(
                     f"Vehicle spawned failed: id is {vehicle.vehicle_id}")
@@ -447,10 +450,14 @@ class LocalScenario(object):
                 name=f"thread_{walker.walker_id}")
             walker.control_thread.start()
 
+        self.running = True
+
     def scenario_end(self):
         self.remove_all_npcs()
         if self.evaluate_obj:
             self.evaluate_obj.evaluate()
+        
+        self.running = False
 
     def vehicle_control_handler(self, vehicle: NpcVehicle):
         while not vehicle.close_event.is_set():
@@ -460,8 +467,8 @@ class LocalScenario(object):
                     break
                 # 1. wait until vehicle can run
                 if (not vehicle.is_running and
-                    not vehicle.close_event.is_set()
-                    ):
+                        not vehicle.close_event.is_set()
+                        ):
                     # Check if it's time for this vehicle to run
                     curr_time = self.carla_world.get_snapshot().timestamp
                     time_passed = curr_time.elapsed_seconds - \
@@ -600,10 +607,14 @@ class LocalScenario(object):
         ego_ss = world_snapshot.find(self.ego.id)
         npc_vehicles_ss = []
         for vehicle in self.npc_vehicle_list:
-            npc_vehicles_ss.append(world_snapshot.find(vehicle.id))
+            if not vehicle.vehicle:
+                continue
+            npc_vehicles_ss.append(world_snapshot.find(vehicle.vehicle.id))
         npc_walkers_ss = []
         for walker in self.npc_walker_list:
-            npc_walkers_ss.append(world_snapshot.find(walker.id))
+            if not walker.walker:
+                continue
+            npc_walkers_ss.append(world_snapshot.find(walker.walker.id))
 
         min_dis = 9999
         for npc in npc_vehicles_ss + npc_walkers_ss:
@@ -611,8 +622,8 @@ class LocalScenario(object):
             if dis < min_dis:
                 min_dis = dis
 
-        unsmooth_acc = 0 if (abs(ego_ss.get_acceleration.x) < 4) else (
-            abs(ego_ss.get_acceleration.x) - 4)
+        unsmooth_acc = 0 if (abs(ego_ss.get_acceleration().x) < 4) else (
+            abs(ego_ss.get_acceleration().x) - 4)
 
         walker_in_road = 0
         for walker in npc_vehicles_ss:
