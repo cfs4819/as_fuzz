@@ -74,7 +74,6 @@ class SceneSegment(object):
         self.vehicle_pos_listener_thread: threading.Thread = None
 
         self.stop_vehicle_pos_listening = False
-        self.stop_route_listening = False
 
     def phrase_xodr(self):
         for road in self.xodr_root.findall('road'):
@@ -140,11 +139,11 @@ class SceneSegment(object):
             is_in_list = []
             already_in_list = []
             for index, seg in enumerate(self.segments):
-                is_in = self.check_if_loc_in_segment(pos,seg)
+                is_in = self.check_if_loc_in_segment(pos, seg)
                 is_in_list.append(is_in)
                 if is_in:
                     already_in_list.append(index)
-            
+
             if already_in_list != []:
                 self.curr_seg_index = already_in_list[0]
                 if self.curr_seg_index != last_in_index:
@@ -158,8 +157,7 @@ class SceneSegment(object):
                 self.belongs_to_two_index = (False, False)
                 if last_in_index == self.curr_seg_index:
                     self.finished_index = self.curr_seg_index
-            
-           
+
             # in_curr = self.check_if_loc_in_segment(
             #     pos, self.segments[self.curr_seg_index])
             # in_next = False
@@ -210,40 +208,46 @@ class SceneSegment(object):
                 size = 'medium'
 
             if road_id not in self.map_road_to_junctions:
-                return f'junction_{size}_-1dir'
+                return f'junction_{size}_-1_dir'
 
             jun_index = self.map_road_to_junctions[road_id]
             if jun_index not in self.map_junctions:
-                return f'junction_{size}_-1dir'
+                return f'junction_{size}_-1_dir'
 
-            # for example 'junction_medium_3dir'
-            return f"junction_{size}_{self.map_junctions[jun_index]['dir_count']}dir"
+            # for example 'junction_medium_3_dir'
+            return f"junction_{size}_{self.map_junctions[jun_index]['dir_count']}_dir"
 
         else:
             if road_id in self.map_roads:
-                lan_dir = '2way'
+                lan_dir = '2_way'
                 if len(self.map_roads[road_id]['left_lane']) == 0 or \
                         len(self.map_roads[road_id]['right_lane']) == 0:
-                    lan_dir = '1way'
+                    lan_dir = '1_way'
 
-                # for example 'straight_2way_8lane'
-                return (f"straight_{lan_dir}_{self.map_roads[road_id]['lane_num']}lane")
+                # for example 'straight_2_way_8_lane'
+                return (f"straight_{lan_dir}_{self.map_roads[road_id]['lane_num']}_lane")
             else:
-                return ('straight_-1way_-1lane')
-    def wait_for_route(self, req_time, interval=-2, wait_from_req_time=False):
-        self.stop_route_listening = False
+                return ('straight_-1_way_-1_lane')
+
+    def wait_for_route(self, req_time, interval=-2, wait_from_req_time=False,
+                       timeout=10):
         if wait_from_req_time:
             while self.routing_listener.req_time == None or \
                     (self.routing_listener.req_time - req_time) <= interval:
-                if self.stop_route_listening == True:
-                    break
+                if not self.routing_listener.running or timeout <= 0:
+                    return False
                 time.sleep(0.1)
+                timeout -= 0.1
+
         else:
             while self.routing_listener.recv_time == None or \
                     (self.routing_listener.recv_time - req_time) <= interval:
-                if self.stop_route_listening == True:
-                    break
+                if not self.routing_listener.running or timeout <= 0:
+                    return False
                 time.sleep(0.1)
+                timeout -= 0.1
+                
+        return True
 
     def get_seg_from_junction_wp(self, wp: carla.Waypoint, length: float, width: float):
         junction = wp.get_junction()
@@ -268,6 +272,14 @@ class SceneSegment(object):
         segs.reverse()
         return segs
 
+    def get_seg_from_straight_from_start_wp(self, wp: carla.Waypoint,
+                                           length: float, width: float):
+        segs = []
+        among_wps = wp.next_until_lane_end(length)
+        for among_wp in among_wps:
+            segs.append(Segment(among_wp.transform.location,
+                                among_wp.transform.rotation, length, width))
+            
     def get_seg_between_two_wp(self, wp_s: carla.Waypoint,
                                wp_e: carla.Waypoint,
                                length: float, width: float):
@@ -334,7 +346,9 @@ class SceneSegment(object):
                 ).get_waypoint(start_loc)
 
         for i, route_wp in enumerate(routing_wps):
-            if route_wp[1].is_junction:
+            if route_wp[0].is_junction and route_wp[1].is_junction:
+                if i == 0:
+                    continue
                 junction_segs = self.get_seg_from_junction_wp(route_wp[0],
                                                               length, width)
                 for seg in junction_segs:
@@ -351,10 +365,36 @@ class SceneSegment(object):
                     seg.belongs_to_roadid = routting_road[i]
                 self.segments += final_segs
                 continue
+                
+            if route_wp[0].is_junction and not route_wp[1].is_junction:
+                first_segs = self.get_seg_from_straight_to_end_wp(route_wp[1],
+                                                                  length, width)
+                for seg in first_segs:
+                    seg.belongs_to_roadid = routting_road[i]
+                self.segments += first_segs
+                continue
+            # elif not route_wp[0].is_junction and route_wp[1].is_junction:
+            #     last_segs = self.get_seg_from_straight_to_end_wp(route_wp[0],
+            #                                                      length, width)
+            #     for seg in last_segs:
+            #         seg.belongs_to_roadid = routting_road[i]
+            #     self.segments +=last_segs
+
             between_segs = self.get_seg_from_full_road(route_wp, length, width)
             for seg in between_segs:
                 seg.belongs_to_roadid = routting_road[i]
+
             self.segments += between_segs
+
+        # delete those segs that are too close to each other
+        segs_temp = self.segments
+        for index in range(1, len(self.segments)):
+            if self.segments[index-1] == None:
+                continue
+            if self.segments[index].location.distance(
+                    self.segments[index - 1].location) < length*2/3:
+                segs_temp[index] = None
+        self.segments = [seg for seg in segs_temp if seg != None]
 
         if self.debug:
             carla_db = self.carla_world.debug
@@ -378,7 +418,6 @@ if __name__ == '__main__':
 
     def signal_handler(sig, frame):
         SS.routing_listener.stop()
-        SS.stop_route_listening = True
         exit()
 
     signal.signal(signal.SIGINT, signal_handler)

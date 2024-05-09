@@ -88,7 +88,7 @@ def is_point_in_crosswalk(point: carla.Location, crosswalk: List[carla.Location]
     n = len(crosswalk)
     inside = False
 
-    p1x, p1y = crosswalk[0]
+    p1x, p1y = crosswalk[0].x, crosswalk[0].y
     for i in range(n + 1):
         p2x, p2y = crosswalk[i % n].x, crosswalk[i % n].y
         if y > min(p1y, p2y):

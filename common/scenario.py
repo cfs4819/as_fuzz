@@ -258,7 +258,7 @@ class LocalScenario(object):
         )
 
         start_waypoint_tf = start_waypoint.transform
-        start_waypoint_tf.location.z += 2.5
+        start_waypoint_tf.location.z += 1
 
         end_waypoint = self.carla_map.get_waypoint(
             carla.Location(x=end_loc['x'],
@@ -349,7 +349,7 @@ class LocalScenario(object):
         )
 
         start_waypoint_tf = start_waypoint.transform
-        start_waypoint_tf.location.z += 2.5
+        start_waypoint_tf.location.z += 1
 
         end_waypoint = self.carla_map.get_waypoint(
             carla.Location(x=end_loc['x'],
@@ -373,56 +373,72 @@ class LocalScenario(object):
                                               behavior_type=behavior_type,
                                               walker_id=walker_id))
 
+    def spawn_a_vehicle_handler(self, vehicle: NpcVehicle):
+        vehicle.vehicle = self.carla_world.try_spawn_actor(vehicle.blueprint,
+                                                           vehicle.start_loc)
+        self.carla_world.wait_for_tick()
+        if vehicle.vehicle == None:
+            logger.warning(
+                f"Vehicle spawned failed: id is {vehicle.vehicle_id}")
+            self.sce_obj_2_carla_actor_id[vehicle.vehicle_id] = -1
+            return
+        vehicle.spawned = True
+        logger.info(f"Vehicle spawned: id is {vehicle.vehicle_id}")
+        self.sce_obj_2_carla_actor_id[vehicle.vehicle_id] = vehicle.vehicle.id
+        if vehicle.behavior_type == 2:
+            # is a parked vehicle
+            return
+
+        vehicle.agent = BehaviorAgent(vehicle.vehicle,
+                                      behavior=vehicle.agent_type)
+        vehicle.agent.set_destination(vehicle.end_loc.location)
+        return
+
+    def spawn_a_walker_handler(self, walker: NpcWalker):
+        walker.walker = self.carla_world.try_spawn_actor(walker.blueprint,
+                                                         walker.start_loc)
+        self.carla_world.wait_for_tick()
+        if walker.walker == None:
+            logger.warning(
+                f"Walker spawned failed: id is {walker.walker_id}")
+            self.sce_obj_2_carla_actor_id[walker.walker_id] = -1
+            return
+        walker.spawned = True
+        self.sce_obj_2_carla_actor_id[walker.walker_id] = walker.walker.id
+        if walker.behavior_type == 1:
+            return
+        walker_controller_bp = self.world_blueprint.find(
+            'controller.ai.walker')
+        walker.ai_controller = self.carla_world.spawn_actor(walker_controller_bp,
+                                                            walker.start_loc,
+                                                            attach_to=walker.walker)
+        walker.ai_controller.go_to_location(walker.end_loc.location)
+        walker.ai_controller.set_max_speed(walker.max_speed)
+        return
+
     def spawn_all_npcs(self):
         # call when loading scenarios
 
+        vehicle_spawn_threads: List[threading.Thread] = []
+        walker_spawn_threads: List[threading.Thread] = []
+
         for vehicle in self.npc_vehicle_list:
-            vehicle.vehicle = self.carla_world.try_spawn_actor(vehicle.blueprint,
-                                                               vehicle.start_loc)
-            # self.carla_world.wait_for_tick()
-            if vehicle.vehicle == None:
-                logger.warning(
-                    f"Vehicle spawned failed: id is {vehicle.vehicle_id}")
-                self.sce_obj_2_carla_actor_id[vehicle.vehicle_id] = -1
-                continue
-            vehicle.spawned = True
-            logger.info(
-                f"Vehicle spawned: id is {vehicle.vehicle_id}")
-            self.sce_obj_2_carla_actor_id[vehicle.vehicle_id] = vehicle.vehicle.id
-            if vehicle.behavior_type == 2:
-                # is a parked vehicle
-                continue
-
-            # carla_db = self.carla_world.debug
-            # carla_db.draw_point(vehicle.vehicle.get_transform().location+carla.Location(0,0,3),
-            #                     size=0.1, color=carla.Color(238,233,191))
-
-            vehicle.agent = BehaviorAgent(
-                vehicle.vehicle, behavior=vehicle.agent_type)
-            vehicle.agent.set_destination(vehicle.end_loc.location)
-
+            this_spawn_thread = threading.Thread(
+                target=self.spawn_a_vehicle_handler, args=(vehicle,))
+            vehicle_spawn_threads.append(this_spawn_thread)
+            this_spawn_thread.start()
+            
         for walker in self.npc_walker_list:
-            walker.walker = self.carla_world.try_spawn_actor(
-                walker.blueprint, walker.start_loc)
+            this_spawn_thread = threading.Thread(
+                target=self.spawn_a_walker_handler, args=(walker,))
+            walker_spawn_threads.append(this_spawn_thread)
+            this_spawn_thread.start()
 
-            if walker.walker == None:
-                logger.warning(
-                    f"Walker spawned failed: id is {walker.walker_id}")
-                self.sce_obj_2_carla_actor_id[walker.walker_id] = -1
-                continue
-            walker.spawned = True
-            self.sce_obj_2_carla_actor_id[walker.walker_id] = walker.walker.id
-            if walker.behavior_type == 1:
-                continue
-            walker_controller_bp = self.world_blueprint.find(
-                'controller.ai.walker')
-            walker.ai_controller = self.carla_world.spawn_actor(
-                walker_controller_bp, walker.start_loc, attach_to=walker.walker)
-            walker.ai_controller.go_to_location(
-                walker.end_loc.location)
-            walker.ai_controller.set_max_speed(walker.max_speed)
+        for spawn_thread in vehicle_spawn_threads:
+            spawn_thread.join()
 
-        # self.carla_world.wait_for_tick()
+        for spawn_thread in walker_spawn_threads:
+            spawn_thread.join()
 
     def scenario_start(self):
         self.scenario_start_time = self.carla_world.get_snapshot().timestamp
@@ -456,7 +472,7 @@ class LocalScenario(object):
         self.remove_all_npcs()
         if self.evaluate_obj:
             self.evaluate_obj.evaluate()
-        
+
         self.running = False
 
     def vehicle_control_handler(self, vehicle: NpcVehicle):
@@ -468,7 +484,7 @@ class LocalScenario(object):
                 # 1. wait until vehicle can run
                 if (not vehicle.is_running and
                         not vehicle.close_event.is_set()
-                        ):
+                    ):
                     # Check if it's time for this vehicle to run
                     curr_time = self.carla_world.get_snapshot().timestamp
                     time_passed = curr_time.elapsed_seconds - \
@@ -540,14 +556,16 @@ class LocalScenario(object):
             for agent in agent_list:
                 if agent.control_thread and agent.close_event:
                     agent.close_event.set()
-                with self.refresh_condition:
-                    self.refresh_condition.notify_all()
-                    self.refresh_condition.notify_all()
+                if self.refresh_condition:
+                    with self.refresh_condition:
+                        self.refresh_condition.notify_all()
+                        self.refresh_condition.notify_all()
 
         # make sure all agent threads can finish
-        with self.refresh_condition:
-            self.refresh_condition.notify_all()
-            self.refresh_condition.notify_all()
+        if self.refresh_condition:
+            with self.refresh_condition:
+                self.refresh_condition.notify_all()
+                self.refresh_condition.notify_all()
 
         for agent_list in [self.npc_vehicle_list, self.npc_walker_list]:
             for agent in agent_list:
@@ -555,19 +573,22 @@ class LocalScenario(object):
                     agent.control_thread.join()
 
         # delete both parked vehicle and driving vehicle
-        for vehicle in self.npc_vehicle_list:
-            if vehicle.vehicle:
-                vehicle.vehicle.destroy()
-            # self.npc_vehicle_list.remove(vehicle)
-        self.npc_vehicle_list = []
-        for walker in self.npc_walker_list:
-            if walker.ai_controller:
-                walker.ai_controller.destroy()
-            if walker.walker:
-                walker.walker.destroy()
-            # self.npc_walker_list.remove(walker)
-        self.npc_walker_list = []
-        self.carla_world.wait_for_tick()
+        try:
+            for vehicle in self.npc_vehicle_list:
+                if vehicle.vehicle:
+                    vehicle.vehicle.destroy()
+                # self.npc_vehicle_list.remove(vehicle)
+            self.npc_vehicle_list = []
+            for walker in self.npc_walker_list:
+                if walker.ai_controller:
+                    walker.ai_controller.destroy()
+                if walker.walker:
+                    walker.walker.destroy()
+                # self.npc_walker_list.remove(walker)
+            self.npc_walker_list = []
+
+        except:
+            pass
 
     def npc_refresh(self):
         '''

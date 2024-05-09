@@ -49,15 +49,15 @@ class Evaluate_Object:
             self.vehicle_ind.fitness = (0, 0, 0, 0)
             self.is_evaluated = True
             return
-        f_distance = self.frame_recorded[0]['min_distance']
+        f_distance = self.frame_recorded[0]['min_dis']
         f_unsmooth_acc = self.frame_recorded[0]['unsmooth_acc']
 
         walker_in_road_count = 0
         vehicle_may_collide = 0
 
         for frame in self.frame_recorded:
-            if frame['min_distance'] < f_distance:
-                f_distance = frame['min_distance']
+            if frame['min_dis'] < f_distance:
+                f_distance = frame['min_dis']
 
             if frame['unsmooth_acc'] > f_unsmooth_acc:
                 f_unsmooth_acc = frame['unsmooth_acc']
@@ -75,11 +75,11 @@ class Evaluate_Object:
         self.f_crossing_time = walker_in_road_count/len(self.frame_recorded)
         self.f_interaction_rate = vehicle_may_collide/len(self.frame_recorded)
 
-        self.walker_ind.fitness = (self.f_distance,
+        self.walker_ind.fitness.values = (self.f_distance,
                                    self.f_smooth,
                                    self.f_diversity,
                                    self.f_crossing_time)
-        self.vehicle_ind.fitness = (self.f_distance,
+        self.vehicle_ind.fitness.values = (self.f_distance,
                                     self.f_smooth,
                                     self.f_diversity,
                                     self.f_interaction_rate)

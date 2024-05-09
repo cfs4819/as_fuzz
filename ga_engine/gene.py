@@ -34,6 +34,7 @@ class GeneNpcVehicle:
 class WalkerListFitness(base.Fitness):
     """
     Class to represent weight of each fitness function
+    (f_distance, f_smooth, f_diversity, f_crossing_time)
     """
     # minimize closest distance between pair of ADC
     # maximize number of unique decisions being made
@@ -45,6 +46,7 @@ class WalkerListFitness(base.Fitness):
 class VehicleListFitness(base.Fitness):
     """
     Class to represent weight of each fitness function
+    (f_distance, f_smooth, f_diversity, f_interaction_rate)
     """
     # minimize closest distance between pair of ADC
     # maximize number of unique decisions being made
@@ -54,7 +56,7 @@ class VehicleListFitness(base.Fitness):
 
 
 class GeneNpcWalkerList:
-    def __init__(self, id='', list: List[GeneNpcWalker] = [], max_count: int = 10):
+    def __init__(self, id='', list: List[GeneNpcWalker] = [], max_count: int = 5):
         self.id = id  # gen_{}
         self.list: List[GeneNpcWalker] = list
 
@@ -84,7 +86,7 @@ class GeneNpcWalkerList:
 
 
 class GeneNpcVehicleList:
-    def __init__(self, id='', list: List[GeneNpcVehicle] = [], max_count: int = 10):
+    def __init__(self, id='', list: List[GeneNpcVehicle] = [], max_count: int = 5):
         self.id = id
         self.list: List[GeneNpcVehicle] = list
 
@@ -121,15 +123,15 @@ class GeneNpcVehicleList:
         return new_vehicle
 
 
-def get_new_walker_ind() -> GeneNpcWalkerList:
-    ind = GeneNpcWalkerList()
-    ind.list.append(ind.get_a_new_agent())
+def get_new_walker_ind(max_count:int=5) -> GeneNpcWalkerList:
+    ind = GeneNpcWalkerList(max_count=max_count)
+    ind.list = [ind.get_a_new_agent()]
     return ind
 
 
-def get_new_vehicle_ind() -> GeneNpcVehicleList:
-    ind = GeneNpcVehicleList()
-    ind.list.append(ind.get_a_new_agent())
+def get_new_vehicle_ind(max_count:int=5) -> GeneNpcVehicleList:
+    ind = GeneNpcVehicleList(max_count=max_count)
+    ind.list = [ind.get_a_new_agent()]
     return ind
 
 
