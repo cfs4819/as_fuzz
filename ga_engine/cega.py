@@ -27,6 +27,14 @@ class CEGA:
         self.scene_width = cfgs.scenario_width
 
         self.type_str = 'straight'  # straight, junctio
+        self.road_type = 'straight'
+        self.way_num = 2
+        self.lane_num = 2
+        self.junction_size = 'small'
+        self.junction_dir_num = 3
+
+        self.ind_vehicle_max_count = 3
+        self.ind_walker_max_count = 3
 
         self.evaluate_list: List[Evaluate_Object] = []
 
@@ -34,6 +42,34 @@ class CEGA:
 
         self.main_thread: threading.Thread = None
         self.stop_event: threading.Event = None
+
+    def prase_road_type(self, type_str: str):
+        str_seg = type_str.split('_')
+
+        if str_seg[0] == 'junction':
+            # for example 'junction_medium_3_dir', by default small_3_dir
+            self.road_type = str_seg[0]
+            self.junction_size = str_seg[1]
+            self.junction_dir_num = int(
+                str_seg[2]) if str_seg[2] != '-1' else 3
+
+            if self.junction_size == 'small':
+                self.ind_vehicle_max_count = 3
+                self.ind_walker_max_count = 4
+            elif self.junction_size == 'medium':
+                self.ind_vehicle_max_count = 4
+                self.ind_walker_max_count = 5
+            elif self.junction_size == 'large':
+                self.ind_vehicle_max_count = 5
+                self.ind_walker_max_count = 6
+
+        elif str_seg[0] == 'straight':
+            # for example 'straight_2_way_8_lane', by default 2_way_2_lane
+            self.road_type = str_seg[0]
+            self.way_num = int(str_seg[1]) if str_seg[1] != '-1' else 2
+            self.lane_num = int(str_seg[3]) if str_seg[3] != '-1' else 2
+
+            self.ind_vehicle_max_count = 1.5*self.lane_num
 
     def evaluate(self, walker_ind: GeneNpcWalkerList, vehicle_ind: GeneNpcVehicleList):
         '''
@@ -61,7 +97,7 @@ class CEGA:
         return -1, -1, -1, -1, -1
 
     def mate_walkers(self, ind1: GeneNpcWalkerList, ind2: GeneNpcWalkerList):
-        offspring = GeneNpcWalkerList
+        offspring = GeneNpcWalkerList(max_count=self.ind_walker_max_count)
 
         for index in range(min(len(ind1.list), len(ind2.list))):
             parent1 = ind1.list[index]
@@ -88,7 +124,7 @@ class CEGA:
         return offspring
 
     def mate_vehicles(self, ind1: GeneNpcVehicleList, ind2: GeneNpcVehicleList):
-        offspring = GeneNpcVehicleList()
+        offspring = GeneNpcVehicleList(max_count=self.ind_vehicle_max_count)
 
         for index in range(min(len(ind1.list), len(ind2.list))):
             parent1 = ind1.list[index]
@@ -234,10 +270,19 @@ class CEGA:
             self.logger.info(f"Start GA {self.type_str}:")
 
         # GA Hyperparameters
-        POP_SIZE = 10   # number of population
-        OFF_SIZE = 10   # number of offspring to produce
-        CXPB = 0.6      # crossover probability
-        MUTPB = 0.4     # mutation probability
+        # POP_SIZE = 10   # number of population
+        # OFF_SIZE = 10   # number of offspring to produce
+        # CXPB = 0.6      # crossover probability
+        # MUTPB = 0.4     # mutation probability
+
+        # number of population
+        POP_SIZE = 8 if self.road_type == 'straight' else 4
+        # number of offspring to produce
+        OFF_SIZE = 8 if self.road_type == 'straight' else 4
+        # crossover probability
+        CXPB = 0.6
+        # mutation probability
+        MUTPB = 0.4
 
         # Co-evolutionary Genetic Algorithm
         tb_walkers = base.Toolbox()
@@ -252,14 +297,16 @@ class CEGA:
         tb_vehicles.register('select', tools.selNSGA2)
 
         pop_walkers: List[GeneNpcWalkerList] = [
-            get_new_walker_ind() for _ in range(POP_SIZE)]
+            get_new_walker_ind(max_count=self.ind_walker_max_count) for _ in range(POP_SIZE)]
         pop_vehicles: List[GeneNpcVehicleList] = [
-            get_new_vehicle_ind() for _ in range(POP_SIZE)]
+            get_new_vehicle_ind(max_count=self.ind_vehicle_max_count) for _ in range(POP_SIZE)]
 
         for index, c in enumerate(pop_walkers):
             c.id = f'gen_0_ind_{index}'
+            print(f'{c.id}, {c.max_walker_count}, {len(c.list)}')
         for index, c in enumerate(pop_vehicles):
             c.id = f'gen_0_ind_{index}'
+            print(f'{c.id}, {c.max_vehicle_count}, {len(c.list)}')
 
         hof_walkers = tools.ParetoFront()
         hof_vehicles = tools.ParetoFront()
