@@ -73,7 +73,6 @@ class CEGA:
 
     def evaluate(self, walker_ind: GeneNpcWalkerList, vehicle_ind: GeneNpcVehicleList):
         '''
-        TODO:
             1. Target:
                 wait for evaluate result
                 then return <walker_fitness, vehicle_fitness>
@@ -315,7 +314,6 @@ class CEGA:
         if self.logger:
             self.logger.info(f' ====== Analyzing Initial Population ====== ')
 
-        # TODO: add inds to evaluate list
         self.evaluate_pop(pop_walkers, pop_vehicles)
 
         hof_walkers.update(pop_walkers)
@@ -368,7 +366,9 @@ class CEGA:
                 # save if needed
                 return
 
-            evaluate_obj = Evaluate_Object(walker_ind, vehicle_ind)
+            evaluate_obj = Evaluate_Object(walker_ind, 
+                                           vehicle_ind, 
+                                           id=(walker_ind.id, vehicle_ind.id))
             self.evaluate_list.append(evaluate_obj)
 
         # wait until all evaluate_obj are evaluated

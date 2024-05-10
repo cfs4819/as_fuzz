@@ -8,10 +8,17 @@ from MS_fuzz.ga_engine.gene import GeneNpcWalkerList, GeneNpcVehicleList
 
 
 class Evaluate_Object:
-    def __init__(self, walker_ind: GeneNpcWalkerList, vehicle_ind: GeneNpcVehicleList):
+    def __init__(self, 
+                 walker_ind: GeneNpcWalkerList, 
+                 vehicle_ind: GeneNpcVehicleList,
+                 id=('','')):
         self.walker_ind: GeneNpcWalkerList = walker_ind
         self.vehicle_ind: GeneNpcVehicleList = vehicle_ind
-
+        if id[0]==id[1]:
+            self.id = id[0]
+        else:
+            self.id = id[0]+'_'+id[1]
+        
         self.is_evaluated = False
 
         self.f_crossing_time = 0
