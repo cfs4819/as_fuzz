@@ -251,8 +251,10 @@ class Simulator(object):
         logger.info(f"[Simulator] World is set to {synchronous_mode_str} mode")
         logger.info(f"[Simulator] Running ...")
 
-        self.scene_segmentation.wait_for_route(
-            route_req_time, wait_from_req_time=True)
+        logger.info("[Simulator] Waiting for Apollo to find the route")
+        if not self.scene_segmentation.wait_for_route(
+                route_req_time, wait_from_req_time=True):
+            raise KeyboardInterrupt
         self.scene_segmentation.get_segments(
             cfg.scenario_length, cfg.scenario_width)
         self.scene_segmentation.routing_listener.stop()
@@ -267,36 +269,77 @@ class Simulator(object):
             ip=self.cfgs.dreamview_ip,
             port=str(self.cfgs.dreamview_port))
 
-        print('scene_segmentation.curr_seg_index',
+        logger.info('scene_segmentation.curr_seg_index',
               self.scene_segmentation.curr_seg_index)
-        print('waitting until the vehicle reach the first segment')
+        logger.info('waitting until the vehicle reach the first segment')
         # wait until the vehicle reach first segment
         while (self.scene_segmentation.curr_seg_index < 0):
             if self.close_event.is_set():
                 return
             self.carla_world.wait_for_tick()
             self.check_modules(dv)
+        
+        
+        # while (1):
+        #     if self.close_event.is_set():
+        #         return
+        #     self.carla_world.wait_for_tick()
+        #     self.check_modules(dv)
 
-        self.curr_local_scenario = LocalScenario(
-            self.carla_world, self.ego_vehicle, logger)
-        self.curr_local_scenario.id = str(self.scene_segmentation.curr_seg_index)
+        while self.sim_status and not self.close_event.is_set():
+            curr_index = self.scene_segmentation.curr_seg_index
 
-        self.load_scenario(self.curr_local_scenario,
-                           self.scene_segmentation.curr_seg_index)
+            if self.scene_segmentation.belongs_to_two_index == (False, False):
+                # just move ego forward until reaching next seg
+                self.carla_world.wait_for_tick()
+                self.check_modules(dv)
+                continue
 
-        self.curr_local_scenario.scenario_start()
-        curr_index = self.scene_segmentation.curr_seg_index
-        while curr_index != self.scene_segmentation.finished_index:
-            if not self.sim_status:
-                break
-            if self.close_event.is_set():
-                break
-            self.carla_world.wait_for_tick()
-            world_ss = self.carla_world.get_snapshot()
-            self.curr_local_scenario.npc_refresh()
-            self.curr_local_scenario.evaluate_snapshot_record(world_ss)
-            self.check_modules(dv)
-        self.curr_local_scenario.scenario_end()
+            if curr_index == 0:
+                # if it's the first seg, curr need to be loaded
+                self.curr_local_scenario = LocalScenario(
+                    self.carla_world, self.ego_vehicle, logger)
+                self.curr_local_scenario.id = str(curr_index)
+                if self.close_event.is_set():
+                    return
+                self.load_scenario(self.curr_local_scenario,
+                                   curr_index)
+
+                self.prev_local_scenario = None
+            else:
+                # unload prev
+                # self.prev_local_scenario.scenario_end()   # has been unloaded
+                # move scenario forward
+                self.prev_local_scenario = self.curr_local_scenario
+                self.curr_local_scenario = self.next_local_scenario
+
+            if curr_index != (len(self.scene_segmentation.segments) - 1):
+                # load next
+                self.next_local_scenario = LocalScenario(
+                    self.carla_world, self.ego_vehicle, logger)
+                self.next_local_scenario.id = str(curr_index + 1)
+
+                if self.close_event.is_set():
+                    return
+                self.load_scenario(self.next_local_scenario,
+                                   curr_index + 1)
+
+            # run curr
+            if not self.curr_local_scenario.running:
+                self.curr_local_scenario.scenario_start()
+
+            while curr_index != self.scene_segmentation.finished_index:
+                if not self.sim_status or self.close_event.is_set():
+                    return
+                self.carla_world.wait_for_tick()
+                self.curr_local_scenario.npc_refresh()
+                world_ss = self.carla_world.get_snapshot()
+                self.curr_local_scenario.evaluate_snapshot_record(world_ss)
+                self.check_modules(dv)
+                if self.scene_segmentation.belongs_to_two_index == (True, True):
+                    if not self.next_local_scenario.running:
+                        self.next_local_scenario.scenario_start()
+            self.curr_local_scenario.scenario_end()
 
         dv.disconnect()
         self.close()
@@ -311,6 +354,7 @@ class Simulator(object):
             # Start a new GA and wait for a individual
             cega = CEGA(cfg, logger=logger)
             cega.type_str = seg_type
+            cega.prase_road_type(seg_type)
             cega.start()
             # store in lib
             self.ga_lib[seg_type] = cega
@@ -341,7 +385,7 @@ class Simulator(object):
         scenario_2_load.spawn_all_npcs()
         return True
 
-    def check_modules(self, dv):
+    def check_modules(self, dv: dreamview.Connection):
         module_status = dv.get_module_status()
         for module, status in module_status.items():
             if (module not in self.modules or
@@ -404,12 +448,29 @@ class Simulator(object):
             self.carla_bridge.pause_event.clear()
 
     def close(self):
+        logger.warning("Shutting down.")
         self.close_event.set()
-        if self.scene_segmentation.routing_listener.running:
-            self.scene_segmentation.routing_listener.stop()
-        self.scene_segmentation.stop_vehicle_listening()
+
+        if self.ga_lib != {}:
+            for seg_type, cega in self.ga_lib.items():
+                cega.stop()
+                logger.warning(f"[Shutdown] CEGA {seg_type} stoped")
+
+        if self.scene_segmentation:
+            if self.scene_segmentation.routing_listener.running:
+                self.scene_segmentation.routing_listener.stop()
+                logger.warning("[Shutdown] Routing listener stoped")
+
+            self.scene_segmentation.stop_vehicle_listening()
+            logger.warning("[Shutdown] Vehicle listening stoped")
+
         if self.curr_local_scenario:
-            self.curr_local_scenario.remove_all_npcs()
+            self.curr_local_scenario.scenario_end()
+            logger.warning("[Shutdown] Current scenario unloaded")
+        if self.next_local_scenario:
+            self.next_local_scenario.scenario_end()
+            logger.warning("[Shutdown] Next scenario unloaded")
+
         if self.cfgs.load_bridge:
             if self.carla_client:
                 self.carla_world = self.carla_client.get_world()
@@ -417,19 +478,21 @@ class Simulator(object):
                 settings.synchronous_mode = False
                 settings.fixed_delta_seconds = None
                 self.carla_world.apply_settings(settings)
-                logger.warning("Shutting down.")
             if self.carla_bridge.shutdown:
                 self.carla_bridge.shutdown.set()
             self.carla_bridge.destroy()
-            logger.info("brigde destroied")
+            logger.warning("[Shutdown] Brigde destroied")
+
         if self.sim_status:
             self.sim_status = False
         if self.carla_world:
             del self.carla_world
             self.carla_world = None
+            logger.warning("[Shutdown] Carla world destroied")
         if self.carla_client:
             del self.carla_client
             self.carla_client = None
+            logger.warning("[Shutdown] Carla client destroied")
 
 
 if __name__ == "__main__":
@@ -437,4 +500,5 @@ if __name__ == "__main__":
     sim = Simulator(cfg)
     sim.initialization()
     sim.main_loop()
+    sim.close()
     pdb.set_trace()
