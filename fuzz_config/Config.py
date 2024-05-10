@@ -60,7 +60,7 @@ class Config:
         self.town = None
         self.cur_time = None
         self.determ_seed = None
-        self.out_dir = None
+        self.out_dir = '/apollo/modules/MS_fuzz/result'
         self.seed_dir = None
 
         # Target config
