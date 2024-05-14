@@ -27,7 +27,8 @@ class NpcBase(object):
                  start_loc,
                  end_loc,
                  blueprint: carla.ActorBlueprint,
-                 start_time):
+                 start_time,
+                 free_roam=False):
 
         self.start_loc: carla.Transform = start_loc
         self.end_loc: carla.Transform = end_loc
@@ -40,6 +41,7 @@ class NpcBase(object):
         self.reached_destination = False
         self.control_thread: threading.Thread = None
         self.close_event: threading.Event = None
+        self.free_roam = free_roam
 
 
 class NpcVehicle(NpcBase):
@@ -206,7 +208,8 @@ class LocalScenario(object):
                         start_speed=0.0,
                         blueprint: carla.ActorBlueprint = None,
                         bp_type: int = 0,
-                        vehicle_id=None):
+                        vehicle_id=None,
+                        free_roam=False):
         '''
         Add a specified vehicle into vehicle list, but have not spawned it
 
@@ -296,14 +299,16 @@ class LocalScenario(object):
             self.vehicle_count = self.vehicle_count + 1
             vehicle_id = f'npc_vehicle_{self.vehicle_count}'
 
-        self.npc_vehicle_list.append(NpcVehicle(start_loc=start_waypoint_tf,
-                                                end_loc=end_waypoint_tf,
-                                                blueprint=blueprint,
-                                                start_time=start_time,
-                                                behavior_type=behavior_type,
-                                                agent_type=agent_type_str,
-                                                start_speed=start_speed,
-                                                vehicle_id=vehicle_id))
+        npc_vehicle = NpcVehicle(start_loc=start_waypoint_tf,
+                                 end_loc=end_waypoint_tf,
+                                 blueprint=blueprint,
+                                 start_time=start_time,
+                                 behavior_type=behavior_type,
+                                 agent_type=agent_type_str,
+                                 start_speed=start_speed,
+                                 vehicle_id=vehicle_id)
+        npc_vehicle.free_roam = free_roam
+        self.npc_vehicle_list.append(npc_vehicle)
 
     def add_npc_walker(self,
                        start_loc: dict,
@@ -427,7 +432,7 @@ class LocalScenario(object):
                 target=self.spawn_a_vehicle_handler, args=(vehicle,))
             vehicle_spawn_threads.append(this_spawn_thread)
             this_spawn_thread.start()
-            
+
         for walker in self.npc_walker_list:
             this_spawn_thread = threading.Thread(
                 target=self.spawn_a_walker_handler, args=(walker,))
@@ -483,7 +488,7 @@ class LocalScenario(object):
                     break
                 # 1. wait until vehicle can run
                 if (not vehicle.is_running and
-                        not vehicle.close_event.is_set()
+                    not vehicle.close_event.is_set()
                     ):
                     # Check if it's time for this vehicle to run
                     curr_time = self.carla_world.get_snapshot().timestamp
@@ -509,10 +514,15 @@ class LocalScenario(object):
                     # print(f"Controlling {vehicle.vehicle_id}, at {vehicle.agent}")
 
                     if vehicle.agent.done():
-                        # finished, close the thread
-                        vehicle.reached_destination = True
-                        vehicle.is_running = False
-                        return
+                        if not vehicle.free_roam:
+                            # finished, close the thread
+                            vehicle.reached_destination = True
+                            vehicle.is_running = False
+                            return
+                        else:
+                            new_dest = random.choice(
+                                self.carla_map.get_spawn_points())
+                            vehicle.agent.set_destination(new_dest.location)
 
         # If close_event is set, stop the vehicle
         vehicle.vehicle.apply_control(vehicle.agent.emergency_stop())
@@ -652,6 +662,7 @@ class LocalScenario(object):
                 walker_in_road += 1
 
         frame_record = {
+            'timestamp ': world_snapshot.timestamp,
             'frame': frame,
             'min_dis': min_dis,
             'unsmooth_acc': unsmooth_acc,
