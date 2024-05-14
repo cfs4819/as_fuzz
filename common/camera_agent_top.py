@@ -12,12 +12,12 @@ from packaging import version
 
 
 class ScenarioRecorder:
-    def __init__(self, world: carla.World, 
-                 ego_vehicle: carla.Vehicle, 
-                 save_floder_path, 
-                 resolution=(832, 468), 
-                 frame_rate=24.0, 
-                 server_version=None):
+    def __init__(self, 
+                 world: carla.World,
+                 cam_tf: carla.Transform,
+                 save_floder_path,
+                 resolution=(832, 468),
+                 frame_rate=24.0,):
         """
         Initializes the ScenarioRecorder class to record scenarios in the CARLA simulator.
 
@@ -37,47 +37,33 @@ class ScenarioRecorder:
         - frame_rate (float): Recording frame rate in frames per second, default 24.0.
         """
         self.world = world
-        self.ego_vehicle = ego_vehicle
+        self.cam_tf = cam_tf
         self.save_path = save_floder_path
         self.frame_rate = frame_rate
 
         self.sub_fig_res = resolution
 
-        self.top_cam_tf = carla.Transform(carla.Location(x=0, y=0.0, z=30),
-                                          carla.Rotation(pitch=-90, yaw=-90, roll=0))
-        self.tpp_cam_tf = carla.Transform(carla.Location(x=-7.5, y=0.0, z=2.5),
-                                          carla.Rotation(pitch=-5, yaw=0, roll=0))
-        if server_version and version.parse(server_version) >= version.parse('0.9.14'):
-            self.tpp_cam_tf = carla.Transform(carla.Location(x=-5.5, y=0.0, z=3),
-                                          carla.Rotation(pitch=5, yaw=0, roll=0))
-        self.fpp_cam_tf = carla.Transform(carla.Location(x=0, y=0.0, z=1.8),
-                                          carla.Rotation(pitch=0.0, yaw=0.0, roll=0.0))
+        self.top_cam = None
 
-        self.back_cam_tf = carla.Transform(carla.Location(x=-0.8, y=0.0, z=1.8),
-                                           carla.Rotation(pitch=0, yaw=-180, roll=0))
+        top_cam_loc = self.cam_tf.location + carla.Location(z=30)
+        top_camm_rot = carla.Rotation(pitch=-90,
+                                      yaw=self.cam_tf.rotation.yaw - 90)
+        self.top_cam_tf = carla.Transform(top_cam_loc,
+                                          top_camm_rot)
 
         self.top_cam = self.create_camera(self.top_cam_tf, 'recorder_top_cam')
-        self.tpp_cam = None
-        if server_version and version.parse(server_version) >= version.parse('0.9.14'):
-            self.tpp_cam = self.create_camera(self.tpp_cam_tf,
-                                              'recorder_tpp_cam',
-                                              carla.AttachmentType.SpringArmGhost)
-        else:
-            self.tpp_cam = self.create_camera(self.tpp_cam_tf,
-                                              'recorder_tpp_cam')
-        self.fpp_cam = self.create_camera(self.fpp_cam_tf, 'recorder_fpp_cam')
-        self.back_cam = self.create_camera(
-            self.back_cam_tf, 'recorder_back_cam')
 
         self.video_writer: cv2.VideoWriter = None
         self.stop_event = threading.Event()  # Initialize the stop event
         self.recording_thread: threading.Thread = None
 
         self.width, self.height = self.sub_fig_res
-        # [top_frame, tpp_frame, fpp_frame, back_frame]
-        self.sensor_frame = [None, None, None, None]
-        self.recording_frame = np.zeros(
-            (self.height * 2, self.width * 2, 3), dtype=np.uint8)
+        # [top_frame]
+        self.sensor_frame = None
+
+        self.recording_frame_size = (self.height, self.width, 3)
+        self.recording_frame = np.zeros(self.recording_frame_size,
+                                        dtype=np.uint8)
 
     def create_camera(self, transform, role_name, attachment_type=carla.AttachmentType.Rigid):
         cam_bp = self.world.get_blueprint_library().find('sensor.camera.rgb')
@@ -86,32 +72,21 @@ class ScenarioRecorder:
         cam_bp.set_attribute('sensor_tick', str(1.0 / self.frame_rate))
         cam_bp.set_attribute('role_name', role_name)
         camera = self.world.spawn_actor(
-            cam_bp, transform, attach_to=self.ego_vehicle, attachment_type=attachment_type)
+            cam_bp, transform, attachment_type=attachment_type)
         self.world.wait_for_tick()
         return camera
 
     def top_img_callback(self, image):
-        self.sensor_frame[0] = image
-
-    def tpp_img_callback(self, image):
-        self.sensor_frame[1] = image
-
-    def fpp_img_callback(self, image):
-        self.sensor_frame[2] = image
-
-    def back_img_callback(self, image):
-        self.sensor_frame[3] = image
+        self.sensor_frame = image
+        # print('callback')
 
     def start_recording(self, save_path=None):
-        self.recording_frame = np.zeros(
-            (self.height * 2, self.width * 2, 3), dtype=np.uint8)
+        self.recording_frame = np.zeros(self.recording_frame_size,
+                                        dtype=np.uint8)
         width, height = self.sub_fig_res
-        final_frame_size = (width * 2, height * 2)
 
         self.top_cam.listen(self.top_img_callback)
-        self.tpp_cam.listen(self.tpp_img_callback)
-        self.fpp_cam.listen(self.fpp_img_callback)
-        self.back_cam.listen(self.back_img_callback)
+
         if save_path == None:
             if not os.path.exists(self.save_path):
                 os.makedirs(self.save_path)
@@ -123,10 +98,15 @@ class ScenarioRecorder:
         fourcc = cv2.VideoWriter_fourcc(*'XVID')
 
         self.stop_event.clear()
+
+        final_frame_size = (width, height)
+
+        print('creating video writer')
         self.video_writer = cv2.VideoWriter(save_path,
                                             fourcc,
                                             self.frame_rate,
                                             final_frame_size)
+        print('video writer created')
         self.recording_thread = threading.Thread(
             target=self.recording_thread_handler)
         self.recording_thread.start()
@@ -134,29 +114,20 @@ class ScenarioRecorder:
     def recording_thread_handler(self):
         self.stop_event.clear()
         while not self.stop_event.is_set():
-            if any(frame == None for frame in self.sensor_frame):
+            if self.sensor_frame == None:
                 continue
 
             start_time = time.time()
 
-            record_array = np.empty(
-                (4, self.height, self.width, 3), dtype=np.uint8)
+            record_array = np.empty((self.height, self.width, 3),
+                                    dtype=np.uint8)
 
-            for index, frame in enumerate(self.sensor_frame):
-                # print(f'{frame.width}x{frame.height}')
-                array = np.frombuffer(frame.raw_data, dtype=np.dtype(
-                    "uint8")).reshape((frame.height, frame.width, 4))
-                # Convert image to an array for video recording
-                record_array[index] = array[:, :, :3]
+            array = np.frombuffer(self.sensor_frame.raw_data, dtype=np.dtype(
+                "uint8")).reshape((self.sensor_frame.height, self.sensor_frame.width, 4))
+            # Convert image to an array for video recording
+            record_array = array[:, :, :3]
 
-            self.recording_frame[:self.height,
-                                 :self.width, :] = record_array[0]
-            self.recording_frame[self.height:self.height
-                                 * 2, :self.width, :] = record_array[1]
-            self.recording_frame[:self.height,
-                                 self.width:self.width * 2, :] = record_array[2]
-            self.recording_frame[self.height:self.height * 2,
-                                 self.width:self.width * 2, :] = record_array[3]
+            self.recording_frame = record_array
 
             self.video_writer.write(self.recording_frame)
 
@@ -179,21 +150,15 @@ class ScenarioRecorder:
         self.video_writer.release()
 
         self.top_cam.stop()
-        self.tpp_cam.stop()
-        self.fpp_cam.stop()
-        self.back_cam.stop()
-        self.recording_frame = np.zeros(
-            (self.height * 2, self.width * 2, 3), dtype=np.uint8)
+        self.recording_frame = np.zeros(self.recording_frame_size,
+                                        dtype=np.uint8)
 
     def __del__(self):
         self.top_cam.destroy()
-        self.tpp_cam.destroy()
-        self.fpp_cam.destroy()
-        self.back_cam.destroy()
 
 
 if __name__ == '__main__':
-    client = carla.Client("172.17.0.1", 5000)
+    client = carla.Client("localhost", 2000)
     client.set_timeout(10.0)
     world = client.get_world()
     settings = world.get_settings()
@@ -220,8 +185,8 @@ if __name__ == '__main__':
         spawn_one = True
     print("Ego vehicle found")
 
-    recorder = ScenarioRecorder(world, 
-                                ego_vehicle, 
+    recorder = ScenarioRecorder(world,
+                                ego_vehicle,
                                 f'./save',
                                 server_version=client.get_server_version())
     print("Starting first recording, will record for 20 seconds")

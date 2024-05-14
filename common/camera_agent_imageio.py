@@ -1,6 +1,6 @@
 import carla
 import threading
-import cv2
+import imageio
 import numpy as np
 import time
 import datetime
@@ -69,7 +69,7 @@ class ScenarioRecorder:
         self.back_cam = self.create_camera(
             self.back_cam_tf, 'recorder_back_cam')
 
-        self.video_writer: cv2.VideoWriter = None
+        self.video_writer = None
         self.stop_event = threading.Event()  # Initialize the stop event
         self.recording_thread: threading.Thread = None
 
@@ -117,16 +117,13 @@ class ScenarioRecorder:
                 os.makedirs(self.save_path)
             curr_datetime = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             save_path = os.path.join(
-                self.save_path, f'recording-{curr_datetime}.avi')
+                self.save_path, f'recording-{curr_datetime}.mp4')
 
         # Create video writer for the final stitched video
-        fourcc = cv2.VideoWriter_fourcc(*'XVID')
+        self.video_writer = imageio.get_writer(save_path, fps=self.frame_rate, codec='libx264', quality=8)
 
+       
         self.stop_event.clear()
-        self.video_writer = cv2.VideoWriter(save_path,
-                                            fourcc,
-                                            self.frame_rate,
-                                            final_frame_size)
         self.recording_thread = threading.Thread(
             target=self.recording_thread_handler)
         self.recording_thread.start()
@@ -147,7 +144,7 @@ class ScenarioRecorder:
                 array = np.frombuffer(frame.raw_data, dtype=np.dtype(
                     "uint8")).reshape((frame.height, frame.width, 4))
                 # Convert image to an array for video recording
-                record_array[index] = array[:, :, :3]
+                record_array[index] = array[:, :, :3][:, :, ::-1]
 
             self.recording_frame[:self.height,
                                  :self.width, :] = record_array[0]
@@ -158,25 +155,16 @@ class ScenarioRecorder:
             self.recording_frame[self.height:self.height * 2,
                                  self.width:self.width * 2, :] = record_array[3]
 
-            self.video_writer.write(self.recording_frame)
+            self.video_writer.append_data(self.recording_frame)
 
             elapsed_time = time.time() - start_time
             sleep_time = max(0, (1.0 / self.frame_rate) - elapsed_time)
             time.sleep(sleep_time)
-        # array = np.frombuffer(self.sensor_frame[0].raw_data, dtype=np.dtype("uint8"))
-        # print(array.shape)
-        # array = array.reshape((self.sensor_frame[0].height, self.sensor_frame[0].width, 4))
-        # print(array.shape)
-        # print(self.sensor_frame[0].height*self.sensor_frame[0].width*4)
-        # # CARLA's images are BGRA, not RGB
-        # bgra_image = array[:, :, :4]  # Include alpha for saving to file
-        # rgb_image = cv2.cvtColor(bgra_image, cv2.COLOR_BGRA2RGB)
-        # cv2.imwrite('output_image.png', rgb_image)
 
     def stop_recording(self):
         self.stop_event.set()
         self.recording_thread.join()
-        self.video_writer.release()
+        self.video_writer.close()
 
         self.top_cam.stop()
         self.tpp_cam.stop()

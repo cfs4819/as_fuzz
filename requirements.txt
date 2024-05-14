@@ -2,3 +2,5 @@ pygame
 deap
 websocket-client
 packaging
+imageio 
+imageio-ffmpeg
