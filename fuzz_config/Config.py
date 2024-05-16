@@ -30,15 +30,15 @@ class Config:
         self.load_world_timeout = 20
         self.frame_rate = 10
 
-        # self.carla_map = "Town10hd"
-        self.carla_map = "Town04"
+        self.carla_map = "Town10hd"
+        # self.carla_map = "Town04"
 
         # carla bridge config
         self.load_bridge = True
 
         # dreamview config
-        # self.dreamview_map = "Carla Town10hd"
-        self.dreamview_map = "Carla Town04"
+        self.dreamview_map = "Carla Town10hd"
+        # self.dreamview_map = "Carla Town04"
         self.dreamview_vehicle = "Lincoln2017MKZ LGSVL"
         self.dreamview_ip  = "localhost"
         self.dreamview_port  = 8888
@@ -60,7 +60,7 @@ class Config:
         self.town = None
         self.cur_time = None
         self.determ_seed = None
-        self.out_dir = '/apollo/modules/MS_fuzz/result'
+        self.out_dir = '/apollo/data/MS_fuzz/result'
         self.seed_dir = None
 
         # Target config
