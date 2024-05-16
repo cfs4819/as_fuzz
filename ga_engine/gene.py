@@ -1,7 +1,6 @@
-import carla
 import random
 import threading
-from agents.navigation.behavior_agent import BehaviorAgent
+
 from deap import base
 from typing import List
 
@@ -125,13 +124,17 @@ class GeneNpcVehicleList:
 
 def get_new_walker_ind(max_count:int=5) -> GeneNpcWalkerList:
     ind = GeneNpcWalkerList(max_count=max_count)
-    ind.list = [ind.get_a_new_agent()]
+    ind.list = []
+    for i in range(random.randint(1, max_count)):
+        ind.list.append(ind.get_a_new_agent())
     return ind
 
 
 def get_new_vehicle_ind(max_count:int=5) -> GeneNpcVehicleList:
     ind = GeneNpcVehicleList(max_count=max_count)
-    ind.list = [ind.get_a_new_agent()]
+    ind.list = []
+    for i in range(random.randint(1, max_count)):
+        ind.list.append(ind.get_a_new_agent())
     return ind
 
 

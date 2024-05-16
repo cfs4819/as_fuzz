@@ -37,6 +37,7 @@ class Evaluate_Object:
         self.frame_recorded: List[Dict] = []
         '''
             frame_record = [{
+                'timestamp ': world_snapshot.timestamp,
                 'frame': frame,
                 'min_dis': min_dis,
                 'unsmooth_acc': unsmooth_acc,
@@ -52,8 +53,8 @@ class Evaluate_Object:
         # frame_duration = frame_end - frame_start + 1
         if not self.frame_recorded or len(self.frame_recorded) == 0:
 
-            self.walker_ind.fitness = (0, 0, 0, 0)
-            self.vehicle_ind.fitness = (0, 0, 0, 0)
+            self.walker_ind.fitness.values = (0, 0, 0, 0)
+            self.vehicle_ind.fitness.values = (0, 0, 0, 0)
             self.is_evaluated = True
             return
         f_distance = self.frame_recorded[0]['min_dis']

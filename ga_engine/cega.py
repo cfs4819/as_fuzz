@@ -6,7 +6,6 @@ from copy import deepcopy
 
 from MS_fuzz.common.evaluate import Evaluate_Object
 from MS_fuzz.ga_engine.gene import *
-from MS_fuzz.fuzz_config.Config import Config
 
 import threading
 import queue
@@ -15,7 +14,8 @@ import time
 
 class CEGA:
     def __init__(self,
-                 cfgs: Config,
+                 scenario_length,
+                 scenario_width,
                  logger=None):
 
         self.max_generation = 100
@@ -23,8 +23,8 @@ class CEGA:
 
         self.logger = logger
 
-        self.scene_length = cfgs.scenario_length
-        self.scene_width = cfgs.scenario_width
+        self.scene_length = scenario_length
+        self.scene_width = scenario_width
 
         self.type_str = 'straight'  # straight, junctio
         self.road_type = 'straight'
@@ -302,10 +302,10 @@ class CEGA:
 
         for index, c in enumerate(pop_walkers):
             c.id = f'gen_0_ind_{index}'
-            print(f'{c.id}, {c.max_walker_count}, {len(c.list)}')
+            # print(f'{c.id}, {c.max_walker_count}, {len(c.list)}')
         for index, c in enumerate(pop_vehicles):
             c.id = f'gen_0_ind_{index}'
-            print(f'{c.id}, {c.max_vehicle_count}, {len(c.list)}')
+            # print(f'{c.id}, {c.max_vehicle_count}, {len(c.list)}')
 
         hof_walkers = tools.ParetoFront()
         hof_vehicles = tools.ParetoFront()
@@ -350,6 +350,7 @@ class CEGA:
 
     def evaluate_pop(self, pop_walkers: List[GeneNpcWalkerList],
                      pop_vehicles: List[GeneNpcVehicleList]):
+        
         pop_size = len(pop_walkers) if len(pop_walkers) < len(
             pop_vehicles) else len(pop_vehicles)
 
