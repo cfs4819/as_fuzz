@@ -1,15 +1,22 @@
 import carla
 import time
-from enum import Enum
+# from enum import Enum
 from threading import Thread, Lock, Event
 
 
-class UNSAFE_TYPE(Enum):
+class UNSAFE_TYPE():
     COLLISION = 1
     CROSSING_SOLID_LANE = 2
     LANE_CHANGE = 3
     STUCK = 4
     ACCELERATION = 5
+
+    type_str = ['NONE',
+                'COLLISION',
+                'CROSSING_SOLID_LANE',
+                'LANE_CHANGE',
+                'STUCK',
+                'ACCELERATION']
 
 
 class UnsafeDetector(object):
@@ -19,6 +26,7 @@ class UnsafeDetector(object):
         self.map = self.world.get_map()
         self.lane_change_detector = None
         self.collision_detector = None
+        self.imu_sensor = None  # Add IMU sensor attribute
         self.callbacks = []
 
         self.active_timers = {}
@@ -30,9 +38,10 @@ class UnsafeDetector(object):
         self.velocity_threshold = 0.1
         self.stuck_timeout = 60.0
 
-        self.acceleration_event = Event()
-        self.acceleration_thread = None
         self.acceleration_threshold = 5.0
+    
+    def register_callback(self, callback):
+        self.callbacks.append(callback)
 
     def init_sensors(self):
         # Setup the lane invasion and collision sensors
@@ -46,20 +55,24 @@ class UnsafeDetector(object):
         self.collision_detector = self.world.spawn_actor(collision_bp,
                                                          carla.Transform(),
                                                          attach_to=self.vehicle)
+        # Setup IMU sensor
+        imu_bp = self.world.get_blueprint_library().find('sensor.other.imu')
+        self.imu_sensor = self.world.spawn_actor(imu_bp, carla.Transform(), attach_to=self.vehicle)
+
 
     def start_detection(self):
         """Starts the detection of unsafe situations."""
         self.lane_change_detector.listen(self.on_lane_invasion)
         self.collision_detector.listen(self.on_collision)
+        self.imu_sensor.listen(self.on_imu_data)  # Add IMU data listener
 
         self.start_stuck_monitor(self.stuck_timeout)
-        self.start_acceleration_monitor()
     
     def stop_detection(self):
         """Stops the detection of unsafe situations."""
         self.lane_change_detector.stop()
         self.collision_detector.stop()
-        self.stop_acceleration_monitor() 
+        self.imu_sensor.stop()  # Stop IMU sensor
         self.stop_stuck_monitor()
     def start_stuck_monitor(self, timeout=60):
         """Starts a thread to monitor if the vehicle is stuck based on its velocity."""
@@ -68,15 +81,6 @@ class UnsafeDetector(object):
         self.stuck_event.clear()
         self.stuck_thread = Thread(target=self.monitor_stuck, args=(timeout,))
         self.stuck_thread.start()
-
-    def start_acceleration_monitor(self, unsafe_threshold=5.0):
-        """Starts a thread to monitor if the vehicle's acceleration exceeds the threshold."""
-        if self.acceleration_thread and self.acceleration_thread.is_alive():
-            return
-        self.acceleration_event.clear()
-        self.acceleration_thread = Thread(target=self.monitor_acceleration,
-                                          args=(unsafe_threshold,))
-        self.acceleration_thread.start()
 
     def monitor_stuck(self, timeout):
         """Monitor vehicle's velocity and trigger callbacks if stuck for too long."""
@@ -99,18 +103,6 @@ class UnsafeDetector(object):
 
             time.sleep(0.05)
 
-    def monitor_acceleration(self, unsafe_threshold):
-        """Monitor vehicle's acceleration and trigger callbacks if exceeds threshold."""
-        while not self.acceleration_event.is_set():
-            current_acceleration = self.vehicle.get_acceleration()
-            acceleration_magnitude = current_acceleration.length()
-            acc = current_acceleration.x
-            if acceleration_magnitude > unsafe_threshold:
-                self.trigger_callbacks(UNSAFE_TYPE.ACCELERATION,
-                                       f"High acceleration detected: \
-                                           {acc:3.2f} m/s^2")
-
-            time.sleep(0.01)
 
     def stop_stuck_monitor(self):
         """Stops the stuck monitoring thread."""
@@ -119,27 +111,26 @@ class UnsafeDetector(object):
         if self.stuck_thread:
             self.stuck_thread.join()
 
-    def stop_acceleration_monitor(self):
-        """Stops the acceleration monitoring thread."""
-        if self.acceleration_event:
-            self.acceleration_event.set()
-        if self.acceleration_thread:
-            self.acceleration_thread.join()
 
     def on_collision(self, event):
         # Handle collision events
         self.trigger_callbacks(UNSAFE_TYPE.COLLISION, 'Collision detected')
 
-    def register_callback(self, callback):
-        self.callbacks.append(callback)
-
     def on_lane_invasion(self, event: carla.LaneInvasionEvent):
         for marking in event.crossed_lane_markings:
-            if marking.type in [carla.LaneMarkingType.Solid,
-                                carla.LaneMarkingType.SolidSolid]:
+            if marking.type == carla.LaneMarkingType.Solid:
                 self.trigger_callbacks(
-                    UNSAFE_TYPE.CROSSING_SOLID_LANE, 'Crossed a solid line')
+                    UNSAFE_TYPE.CROSSING_SOLID_LANE, 'Crossed a single solid line',1)
                 return
+            elif marking.type == carla.LaneMarkingType.SolidSolid:
+                self.trigger_callbacks(
+                    UNSAFE_TYPE.CROSSING_SOLID_LANE, 'Crossed a double solid line',2)
+                return
+            # if marking.type in [carla.LaneMarkingType.Solid,
+            #                     carla.LaneMarkingType.SolidSolid]:
+            #     self.trigger_callbacks(
+            #         UNSAFE_TYPE.CROSSING_SOLID_LANE, 'Crossed a solid line')
+            #     return
         # Handle lane invasion events
         waypoint = self.map.get_waypoint(
             self.vehicle.get_location(), project_to_road=False)
@@ -147,12 +138,25 @@ class UnsafeDetector(object):
 
         with self.timers_lock:
             if uid not in self.active_timers:
+                # print(f'timer {uid}, started')
                 stop_event = Event()
                 timer_thread = Thread(target=self.lane_occupation_timer,
                                       args=(waypoint.road_id, waypoint.section_id, stop_event))
                 self.active_timers[uid] = (timer_thread, stop_event)
                 timer_thread.start()
-
+                
+    
+    def on_imu_data(self, data):
+        """Callback function for IMU sensor data."""
+        acceleration = data.accelerometer        
+        acceleration_magnitude = acceleration.x
+        if abs(acceleration_magnitude) > self.acceleration_threshold:
+            self.trigger_callbacks(
+                UNSAFE_TYPE.ACCELERATION,
+                f"High acceleration detected: {acceleration_magnitude:.2f} m/s^2",
+                round(acceleration_magnitude, 2)
+            )
+    
     def crossing_two_lane(self):
         bounding_box = self.vehicle.bounding_box
         vehicle_transform = self.vehicle.get_transform()
@@ -173,7 +177,16 @@ class UnsafeDetector(object):
 
     def lane_occupation_timer(self, road_id, section_id, stop_event: Event):
         start_time = time.time()
+        
         while not stop_event.is_set() :
+            '''debug'''
+            # bounding_box = self.vehicle.bounding_box
+            # vehicle_transform = self.vehicle.get_transform()
+            # corners = bounding_box.get_world_vertices(vehicle_transform)
+            # db = self.world.debug
+            # for index, cor in enumerate(corners):
+            #     db.draw_point(cor, size=0.1, life_time=0.07, color=carla.Color(255, 0, 0))
+            
             if not self.crossing_two_lane():
                 # no more crossing two lane
                 break
@@ -190,16 +203,16 @@ class UnsafeDetector(object):
                     UNSAFE_TYPE.LANE_CHANGE, 'Long time between lanes')
                 start_time = time.time()
 
-            time.sleep(0.1)
+            time.sleep(0.05)
 
         with self.timers_lock:
             uid = f"{road_id}_{section_id}"
             del self.active_timers[uid]
 
-    def trigger_callbacks(self, type, message):
+    def trigger_callbacks(self, type, message, data=None):
         # Call registered callback functions
         for callback in self.callbacks:
-            callback(type, message)
+            callback(type, message, data)
 
     def cleanup(self):
         # Clean up the sensors and stop all timers
@@ -216,9 +229,11 @@ class UnsafeDetector(object):
             if self.collision_detector:
                 self.collision_detector.stop()
                 self.collision_detector.destroy()
+            if self.imu_sensor:  # Clean up IMU sensor
+                self.imu_sensor.stop()
+                self.imu_sensor.destroy()
 
             self.stop_stuck_monitor()
-            self.stop_acceleration_monitor()
         except Exception as e:
             print(f"Error cleaning up sensors and timers: {e}")
 
@@ -246,14 +261,16 @@ if __name__ == '__main__':
 
     decector = UnsafeDetector(world, ego_vehicle)
 
-    def callback(type, message):
+    def callback(type, message, data):
         if type == UNSAFE_TYPE.ACCELERATION:
-            print(f'{message}\r', end=' ')
+            # print(f'{message}\r', end=' ')
+            pass
         else:
             print(message)
 
     decector.register_callback(callback)
     decector.init_sensors()
+    decector.start_detection()
 
     while True:
         print("Press 'q' to quit or any other key to continue...")
