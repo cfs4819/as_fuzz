@@ -4,3 +4,4 @@
 __pycache__/
 *.py[cod]
 *$py.class
+base_line/command_execution_log.txt
