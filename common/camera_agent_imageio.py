@@ -12,11 +12,11 @@ from packaging import version
 
 
 class ScenarioRecorder:
-    def __init__(self, world: carla.World, 
-                 ego_vehicle: carla.Vehicle, 
-                 save_floder_path, 
-                 resolution=(832, 468), 
-                 frame_rate=24.0, 
+    def __init__(self, world: carla.World,
+                 ego_vehicle: carla.Vehicle,
+                 save_floder_path,
+                 resolution=(832, 468),
+                 frame_rate=24.0,
                  server_version=None):
         """
         Initializes the ScenarioRecorder class to record scenarios in the CARLA simulator.
@@ -49,7 +49,7 @@ class ScenarioRecorder:
                                           carla.Rotation(pitch=-5, yaw=0, roll=0))
         if server_version and version.parse(server_version) >= version.parse('0.9.14'):
             self.tpp_cam_tf = carla.Transform(carla.Location(x=-5.5, y=0.0, z=3),
-                                          carla.Rotation(pitch=5, yaw=0, roll=0))
+                                              carla.Rotation(pitch=5, yaw=0, roll=0))
         self.fpp_cam_tf = carla.Transform(carla.Location(x=0, y=0.0, z=1.8),
                                           carla.Rotation(pitch=0.0, yaw=0.0, roll=0.0))
 
@@ -78,6 +78,12 @@ class ScenarioRecorder:
         self.sensor_frame = [None, None, None, None]
         self.recording_frame = np.zeros(
             (self.height * 2, self.width * 2, 3), dtype=np.uint8)
+        
+        
+        self.top_cam.listen(self.top_img_callback)
+        self.tpp_cam.listen(self.tpp_img_callback)
+        self.fpp_cam.listen(self.fpp_img_callback)
+        self.back_cam.listen(self.back_img_callback)
 
     def create_camera(self, transform, role_name, attachment_type=carla.AttachmentType.Rigid):
         cam_bp = self.world.get_blueprint_library().find('sensor.camera.rgb')
@@ -108,10 +114,6 @@ class ScenarioRecorder:
         width, height = self.sub_fig_res
         final_frame_size = (width * 2, height * 2)
 
-        self.top_cam.listen(self.top_img_callback)
-        self.tpp_cam.listen(self.tpp_img_callback)
-        self.fpp_cam.listen(self.fpp_img_callback)
-        self.back_cam.listen(self.back_img_callback)
         if save_path == None:
             if not os.path.exists(self.save_path):
                 os.makedirs(self.save_path)
@@ -120,9 +122,9 @@ class ScenarioRecorder:
                 self.save_path, f'recording-{curr_datetime}.mp4')
 
         # Create video writer for the final stitched video
-        self.video_writer = imageio.get_writer(save_path, fps=self.frame_rate, codec='libx264', quality=8)
+        self.video_writer = imageio.get_writer(
+            save_path, fps=self.frame_rate, codec='libx264', quality=8)
 
-       
         self.stop_event.clear()
         self.recording_thread = threading.Thread(
             target=self.recording_thread_handler)
@@ -133,6 +135,12 @@ class ScenarioRecorder:
         while not self.stop_event.is_set():
             if any(frame == None for frame in self.sensor_frame):
                 continue
+
+            if any(cam.is_listening == False for cam in [self.top_cam,
+                                                         self.tpp_cam,
+                                                         self.fpp_cam,
+                                                         self.back_cam]):
+                break
 
             start_time = time.time()
 
@@ -163,17 +171,23 @@ class ScenarioRecorder:
 
     def stop_recording(self):
         self.stop_event.set()
-        self.recording_thread.join()
-        self.video_writer.close()
-
-        self.top_cam.stop()
-        self.tpp_cam.stop()
-        self.fpp_cam.stop()
-        self.back_cam.stop()
+        if self.recording_thread:
+            self.recording_thread.join()
+        if self.video_writer:
+            self.video_writer.close()
+            
         self.recording_frame = np.zeros(
             (self.height * 2, self.width * 2, 3), dtype=np.uint8)
 
     def __del__(self):
+        if self.top_cam.is_listening:
+            self.top_cam.stop()
+        if self.tpp_cam.is_listening:
+            self.tpp_cam.stop()
+        if self.fpp_cam.is_listening:
+            self.fpp_cam.stop()
+        if self.back_cam.is_listening:
+            self.back_cam.stop()
         self.top_cam.destroy()
         self.tpp_cam.destroy()
         self.fpp_cam.destroy()
@@ -208,8 +222,8 @@ if __name__ == '__main__':
         spawn_one = True
     print("Ego vehicle found")
 
-    recorder = ScenarioRecorder(world, 
-                                ego_vehicle, 
+    recorder = ScenarioRecorder(world,
+                                ego_vehicle,
                                 f'./save',
                                 server_version=client.get_server_version())
     print("Starting first recording, will record for 20 seconds")
