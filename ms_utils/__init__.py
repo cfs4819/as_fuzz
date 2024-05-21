@@ -105,3 +105,49 @@ def is_point_in_crosswalk(point: carla.Location, crosswalk: List[carla.Location]
 
 def is_point_in_any_crosswalk(point: carla.Location, crosswalk_list: List[List[carla.Location]]):
     return any(is_point_in_crosswalk(point, crosswalk) for crosswalk in crosswalk_list)
+
+
+def predict_collision(actor1: carla.ActorSnapshot,
+                      actor2: carla.ActorSnapshot,
+                      prediction_time=1,
+                      time_step=0.05,
+                      collision_distance=2.0):
+    # Initial conditions
+    position1 = actor1.get_transform().location
+    velocity1 = actor1.get_velocity()
+    acceleration1 = actor1.get_acceleration()
+
+    position2 = actor2.get_transform().location
+    velocity2 = actor2.get_velocity()
+    acceleration2 = actor2.get_acceleration()
+
+    for t in np.arange(0, prediction_time, time_step):
+        # Update positions
+        future_pos1 = carla.Location(
+            x=position1.x + (velocity1.x * t) + 0.5
+            * acceleration1.x * t**2,
+            y=position1.y + (velocity1.y * t) + 0.5
+            * acceleration1.y * t**2,
+            z=position1.z + (velocity1.z * t) + 0.5
+            * acceleration1.z * t**2
+        )
+
+        future_pos2 = carla.Location(
+            x=position2.x + (velocity2.x * t) + 0.5
+            * acceleration2.x * t**2,
+            y=position2.y + (velocity2.y * t) + 0.5
+            * acceleration2.y * t**2,
+            z=position2.z + (velocity2.z * t) + 0.5
+            * acceleration2.z * t**2
+        )
+
+        # Calculate distance between future positions
+        dist = math.sqrt((future_pos1.x - future_pos2.x)**2
+                         + (future_pos1.y - future_pos2.y)**2
+                         + (future_pos1.z - future_pos2.z)**2)
+
+        # Check for potential collision
+        if dist < collision_distance:
+            return True, t
+
+    return False, None

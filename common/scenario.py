@@ -388,7 +388,7 @@ class LocalScenario(object):
             self.sce_obj_2_carla_actor_id[vehicle.vehicle_id] = -1
             return
         vehicle.spawned = True
-        logger.info(f"Vehicle spawned: id is {vehicle.vehicle_id}")
+        # logger.info(f"Vehicle spawned: id is {vehicle.vehicle_id}")
         self.sce_obj_2_carla_actor_id[vehicle.vehicle_id] = vehicle.vehicle.id
         if vehicle.behavior_type == 2:
             # is a parked vehicle
@@ -657,12 +657,12 @@ class LocalScenario(object):
             abs(ego_ss.get_acceleration().x) - 4)
 
         walker_in_road = 0
-        for walker in npc_vehicles_ss:
+        for walker in npc_walkers_ss:
             if is_point_in_any_crosswalk(walker.get_transform().location, self.crosswalk_list):
                 walker_in_road += 1
 
         frame_record = {
-            'timestamp ': world_snapshot.timestamp,
+            'timestamp': time.time(),
             'frame': frame,
             'min_dis': min_dis,
             'unsmooth_acc': unsmooth_acc,
@@ -670,9 +670,9 @@ class LocalScenario(object):
             'npc_vehicles_ss': npc_vehicles_ss,
             'ego_ss': ego_ss
         }
-
-        self.evaluate_obj.frame_recorded.append(frame_record)
-
+        if self.evaluate_obj:
+            self.evaluate_obj.frame_recorded.append(frame_record)
+        return frame_record
         # caculate later
         # vehicle_may_collide = 0
         # for vehicle in npc_vehicles_ss:
