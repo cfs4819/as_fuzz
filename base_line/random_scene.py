@@ -13,7 +13,7 @@ import os
 import sys
 import time
 from datetime import datetime, timedelta
-
+import argparse
 
 import carla
 from carla import VehicleLightState as vls
@@ -34,6 +34,35 @@ from MS_fuzz.common.scenario import LocalScenario
 from MS_fuzz.common.unsafe_detector import *
 from MS_fuzz.ms_utils import predict_collision
 import pdb
+
+
+class SimulationTimeoutTimer:
+    def __init__(self, timeout, callback):
+        self.timeout = timeout
+        self.callback = callback
+        self.timer = None
+        self.lock = threading.Lock()
+
+    def _run(self):
+        with self.lock:
+            self.timer = None
+            self.callback()
+
+    def start(self):
+        with self.lock:
+            if self.timer is not None:
+                self.timer.cancel()
+            self.timer = threading.Timer(self.timeout, self._run)
+            self.timer.start()
+
+    def reset(self):
+        self.start()
+
+    def cancel(self):
+        with self.lock:
+            if self.timer is not None:
+                self.timer.cancel()
+                self.timer = None
 
 
 class RandomScenario():
@@ -104,6 +133,15 @@ class RandomScenario():
 
         self.max_reload = 20
         self.curr_reload = 0
+
+        # Set a 10 minute timeout
+        self.simulation_timeout = SimulationTimeoutTimer(10 * 60,
+                                                         self.simulation_timeout_callback)
+
+    def simulation_timeout_callback(self):
+
+        self.close()
+        sys.exit()
 
     def select_valid_dest(self, radius=100) -> carla.Transform:
         '''
@@ -220,7 +258,7 @@ class RandomScenario():
         finally:
             if self.carla_client:
                 self.close()
-                exit()
+                sys.exit()
 
     def init_environment(self) -> bool:
         self.connect_carla()
@@ -299,12 +337,13 @@ class RandomScenario():
     def reload_local(self,
                      ego_initial_tf: carla.Transform = None,
                      dest=None):
+        self.simulation_timeout.cancel()
         self.curr_reload += 1
         if self.curr_reload >= self.max_reload:
             # give up, exit()
             logger.error('[Exit] Too Much Reload, Give up Simulation')
             self.close()
-            exit()
+            sys.exit()
         self.dv.disable_apollo()
         ego_ctrl = self.ego_vehicle.get_control()
         ego_ctrl.throttle = 0
@@ -350,12 +389,14 @@ class RandomScenario():
 
         self.dv.enable_apollo(self.destination, self.modules)
         self.dv.set_destination_tranform(self.destination)
-        if self.dv.check_module_status(['Prediction', 'Planning']) and\
-            self.wait_until_vehicle_moving(3):
+        if self.dv.check_module_status(['Prediction', 'Planning']) and \
+                self.wait_until_vehicle_moving(3):
             return
         self.dv.enable_apollo(self.destination, self.modules)
         self.dv.set_destination_tranform(self.destination)
         time.sleep(3)
+
+        self.simulation_timeout.start()
 
     def reload(self, ego_initial_tf: carla.Transform = None):
         if self.recorder:
@@ -533,37 +574,41 @@ class RandomScenario():
             return
 
         if type == UNSAFE_TYPE.CROSSING_SOLID_LANE:
+            lane_type_str = 'Other'
             if data == 1:
-                if self.result_to_save['minor_unsafe'] and \
-                        'crossing_solid_lane' in self.result_to_save['minor_unsafe']:
-                    self.result_to_save['minor_unsafe']['crossing_solid_lane'].append({
+                lane_type_str = 'Solid Lane'
+            if data == 2:
+                lane_type_str = 'Solid Solid Lane'
+            if self.result_to_save['minor_unsafe'] and \
+                    'crossing_solid_lane' in self.result_to_save['minor_unsafe']:
+                self.result_to_save['minor_unsafe']['crossing_solid_lane'].append({
+                    'time': time_pass,
+                    'time_str': time_pass_str,
+                    'crossing': lane_type_str
+                })
+            elif self.result_to_save['minor_unsafe'] and \
+                    'crossing_solid_lane' not in self.result_to_save['minor_unsafe']:
+                self.result_to_save['minor_unsafe']['crossing_solid_lane'] = [{
+                    'time': time_pass,
+                    'time_str': time_pass_str,
+                    'crossing': lane_type_str
+                }]
+            else:
+                self.result_to_save['minor_unsafe'] = {
+                    'crossing_solid_lane': [{
                         'time': time_pass,
-                        'time_str': time_pass_str
-                    })
-                elif self.result_to_save['minor_unsafe'] and \
-                        'crossing_solid_lane' not in self.result_to_save['minor_unsafe']:
-                    self.result_to_save['minor_unsafe']['crossing_solid_lane'] = [{
-                        'time': time_pass,
-                        'time_str': time_pass_str
+                        'time_str': time_pass_str,
+                        'crossing': lane_type_str
                     }]
-                else:
-                    self.result_to_save['minor_unsafe'] = {
-                        'crossing_solid_lane': [{
-                            'time': time_pass,
-                            'time_str': time_pass_str
-                        }]
-                    }
-                self.on_unsafe_lock = False
-                return
+                }
+            self.on_unsafe_lock = False
+            return
 
         self.result_to_save['unsafe'] = True
         self.result_to_save['unsafe_type'] = UNSAFE_TYPE.type_str[type]
         logger.info('reload')
-        
-        if type not in [UNSAFE_TYPE.COLLISION, UNSAFE_TYPE.STUCK]:
-            self.save_result(save_video=True)
-        else:
-            self.save_result(save_video=False)
+
+        self.save_result(save_video=True)
 
         near_by_tf = self.carla_map.get_waypoint(
             self.ego_vehicle.get_location()).transform
@@ -574,6 +619,7 @@ class RandomScenario():
 
         if type in [UNSAFE_TYPE.COLLISION, UNSAFE_TYPE.STUCK]:
             # collision, or stuck, need to clear others
+            self.loading_random_scenario = True
             self.random_scenario.scenario_end()
             self.random_scenario = None
             self.carla_world.wait_for_tick()
@@ -622,14 +668,13 @@ class RandomScenario():
     def save_result(self, save_video=True):
         if self.is_recording:
             self.is_recording = False
-        self.recorder.stop_recording()
         self.result_to_save['end_loc'] = {
             'x': self.ego_vehicle.get_location().x,
             'y': self.ego_vehicle.get_location().y,
             'z': self.ego_vehicle.get_location().z
         }
-        now = time.time()
 
+        now = time.time()
         self.result_to_save['end_time'] = now
         self.result_to_save['run_time'] = now - \
             self.result_to_save['start_time']
@@ -697,7 +742,9 @@ class RandomScenario():
                 'interact_frame_rate': will_collide_frame_cnt / total_frame_num,
                 'per_frame': interaction_per_frame
             }
-
+        if save_video:
+            time.sleep(1)
+        self.recorder.stop_recording()
         try:
             resule_str = json.dumps(self.result_to_save, indent=4)
             result_path = os.path.join(self.sce_result_path, 'result.json')
@@ -731,7 +778,7 @@ class RandomScenario():
         self.sim_status = True
 
         self.start_record()
-
+        self.simulation_timeout.start()
         while self.sim_status:
             if self.check_if_ego_close_dest(10):
                 if not self.ego_vehicle.get_control().brake > 0.5:
@@ -746,9 +793,8 @@ class RandomScenario():
                     continue
                 print('\r')
                 print('reach des')
-
                 # Sce end
-                self.save_result()
+                self.save_result(save_video=False)
 
                 # Next sce
                 self.destination = self.select_valid_dest()
@@ -764,10 +810,13 @@ class RandomScenario():
                         break
                 self.sce_index += 1
                 self.start_record()
+                self.simulation_timeout.reset()
 
             world_ss = self.carla_world.wait_for_tick()
             if not self.sim_status:
                 break
+            if not self.random_scenario:
+                print('scenario not detected')
             if not self.loading_random_scenario and self.random_scenario:
                 eval_frame = self.random_scenario.evaluate_snapshot_record(
                     world_ss)
@@ -781,7 +830,6 @@ class RandomScenario():
                                              logger=logger)
 
         spawn_points = self.carla_world.get_map().get_spawn_points()
-        number_of_spawn_points = len(spawn_points)
 
         # Add vehicles
         # --------------
@@ -815,7 +863,7 @@ class RandomScenario():
             ep_dic = {'x': end_point.location.x,
                       'y': end_point.location.y,
                       'z': end_point.location.z}
-            self.random_scenario.add_npc_walker(sp_dic, ep_dic, 0, 0, 1.4)
+            self.random_scenario.add_npc_walker(sp_dic, ep_dic, 0, 0)
 
         self.random_scenario.spawn_all_npcs()
         self.random_scenario.scenario_start()
@@ -825,6 +873,13 @@ class RandomScenario():
     def close(self):
         logger.warning("Shutting down.")
 
+        close_timeout_timer = SimulationTimeoutTimer(10, timeoutfail)
+        
+        def timeoutfail():
+            logger.warning("close timeout")
+            sys.exit()
+        
+        close_timeout_timer.start()
         if self.recorder:
             self.recorder.stop_recording()
             self.recorder = None
@@ -867,12 +922,17 @@ class RandomScenario():
             del self.carla_client
             self.carla_client = None
             logger.warning("[Shutdown] Carla client destroied")
+        close_timeout_timer.cancel()
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Simulation configuration")
+    parser.add_argument('-p', '--port', type=int, default=4000,
+                        help='Set the simulation port (default: 4000)')
+    args = parser.parse_args()
     cfg = Config()
+    cfg.sim_port = args.port
     sim = RandomScenario(cfg)
     sim.initialization()
     sim.main_loop()
     sim.close()
-    # pdb.set_trace()

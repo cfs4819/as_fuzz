@@ -39,7 +39,7 @@ class UnsafeDetector(object):
         self.stuck_timeout = 60.0
 
         self.acceleration_threshold = 5.0
-    
+
     def register_callback(self, callback):
         self.callbacks.append(callback)
 
@@ -57,8 +57,8 @@ class UnsafeDetector(object):
                                                          attach_to=self.vehicle)
         # Setup IMU sensor
         imu_bp = self.world.get_blueprint_library().find('sensor.other.imu')
-        self.imu_sensor = self.world.spawn_actor(imu_bp, carla.Transform(), attach_to=self.vehicle)
-
+        self.imu_sensor = self.world.spawn_actor(
+            imu_bp, carla.Transform(), attach_to=self.vehicle)
 
     def start_detection(self):
         """Starts the detection of unsafe situations."""
@@ -67,13 +67,14 @@ class UnsafeDetector(object):
         self.imu_sensor.listen(self.on_imu_data)  # Add IMU data listener
 
         self.start_stuck_monitor(self.stuck_timeout)
-    
+
     def stop_detection(self):
         """Stops the detection of unsafe situations."""
         self.lane_change_detector.stop()
         self.collision_detector.stop()
         self.imu_sensor.stop()  # Stop IMU sensor
         self.stop_stuck_monitor()
+
     def start_stuck_monitor(self, timeout=60):
         """Starts a thread to monitor if the vehicle is stuck based on its velocity."""
         if self.stuck_thread and self.stuck_thread.is_alive():
@@ -103,14 +104,12 @@ class UnsafeDetector(object):
 
             time.sleep(0.05)
 
-
     def stop_stuck_monitor(self):
         """Stops the stuck monitoring thread."""
         if self.stuck_event:
             self.stuck_event.set()
         if self.stuck_thread:
             self.stuck_thread.join()
-
 
     def on_collision(self, event):
         # Handle collision events
@@ -119,12 +118,14 @@ class UnsafeDetector(object):
     def on_lane_invasion(self, event: carla.LaneInvasionEvent):
         for marking in event.crossed_lane_markings:
             if marking.type == carla.LaneMarkingType.Solid:
-                self.trigger_callbacks(
-                    UNSAFE_TYPE.CROSSING_SOLID_LANE, 'Crossed a single solid line',1)
+                self.trigger_callbacks(UNSAFE_TYPE.CROSSING_SOLID_LANE,
+                                       'Crossed a single solid line',
+                                       1)
                 return
             elif marking.type == carla.LaneMarkingType.SolidSolid:
-                self.trigger_callbacks(
-                    UNSAFE_TYPE.CROSSING_SOLID_LANE, 'Crossed a double solid line',2)
+                self.trigger_callbacks(UNSAFE_TYPE.CROSSING_SOLID_LANE,
+                                       'Crossed a double solid line',
+                                       2)
                 return
             # if marking.type in [carla.LaneMarkingType.Solid,
             #                     carla.LaneMarkingType.SolidSolid]:
@@ -144,11 +145,10 @@ class UnsafeDetector(object):
                                       args=(waypoint.road_id, waypoint.section_id, stop_event))
                 self.active_timers[uid] = (timer_thread, stop_event)
                 timer_thread.start()
-                
-    
+
     def on_imu_data(self, data):
         """Callback function for IMU sensor data."""
-        acceleration = data.accelerometer        
+        acceleration = data.accelerometer
         acceleration_magnitude = acceleration.x
         if abs(acceleration_magnitude) > self.acceleration_threshold:
             self.trigger_callbacks(
@@ -156,7 +156,7 @@ class UnsafeDetector(object):
                 f"High acceleration detected: {acceleration_magnitude:.2f} m/s^2",
                 round(acceleration_magnitude, 2)
             )
-    
+
     def crossing_two_lane(self):
         bounding_box = self.vehicle.bounding_box
         vehicle_transform = self.vehicle.get_transform()
@@ -177,7 +177,7 @@ class UnsafeDetector(object):
 
     def lane_occupation_timer(self, road_id, section_id, stop_event: Event):
         start_time = time.time()
-        
+
         while not stop_event.is_set() :
             '''debug'''
             # bounding_box = self.vehicle.bounding_box
@@ -186,7 +186,7 @@ class UnsafeDetector(object):
             # db = self.world.debug
             # for index, cor in enumerate(corners):
             #     db.draw_point(cor, size=0.1, life_time=0.07, color=carla.Color(255, 0, 0))
-            
+
             if not self.crossing_two_lane():
                 # no more crossing two lane
                 break
