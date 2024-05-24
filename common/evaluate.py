@@ -55,7 +55,7 @@ class Evaluate_Object:
 
             self.walker_ind.fitness.values = (0, 0, 0, 0)
             self.vehicle_ind.fitness.values = (0, 0, 0, 0)
-            self.is_evaluated = True
+            self.is_evaluated = False
             return
         f_distance = self.frame_recorded[0]['min_dis']
         f_unsmooth_acc = self.frame_recorded[0]['unsmooth_acc']

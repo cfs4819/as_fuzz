@@ -1,7 +1,7 @@
 from carla_bridge.apollo_carla_bridge import CarlaCyberBridge
-import fuzz_config as config
 import argparse
-
+from MS_fuzz.fuzz_config.Config import Config
+from MS_fuzz.common.simulator_v2 import Simulator
 def set_args():
     argument_parser = argparse.ArgumentParser()
     argument_parser.add_argument("--debug", action="store_true", default=False)
@@ -43,9 +43,11 @@ def set_args():
 
 
 def main():
-    conf = config.Config()
+    conf = Config()
     argument_parser = set_args()
-    
+    args = argument_parser.parse_args()
+    conf.sim_port = args.port
+    sim = Simulator(conf)
     pass
 
 if __name__ == "__main__":

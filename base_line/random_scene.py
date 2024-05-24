@@ -12,8 +12,9 @@ import glob
 import os
 import sys
 import time
-from datetime import datetime, timedelta
 import argparse
+import signal
+from datetime import datetime, timedelta
 
 import carla
 from carla import VehicleLightState as vls
@@ -32,7 +33,9 @@ from MS_fuzz.fuzz_config.Config import Config
 from MS_fuzz.common.camera_agent_imageio import ScenarioRecorder
 from MS_fuzz.common.scenario import LocalScenario
 from MS_fuzz.common.unsafe_detector import *
-from MS_fuzz.ms_utils import predict_collision
+from MS_fuzz.common.result_saver import ResultSaver
+# from MS_fuzz.ms_utils import predict_collision
+
 import pdb
 
 
@@ -117,12 +120,8 @@ class RandomScenario():
 
         self.result_path = '/apollo/data/random_scenario/result'
         self.sim_result_path = ''
-        self.sce_result_path = ''
 
-        self.result_to_save = {}
-        self.clear_result()
-
-        self.frames_record = []
+        self.result_saver = ResultSaver()
 
         self.sce_index = 0
 
@@ -143,7 +142,7 @@ class RandomScenario():
         self.close()
         sys.exit()
 
-    def select_valid_dest(self, radius=100) -> carla.Transform:
+    def select_valid_dest(self, min_radius=100, max_radius=150) -> carla.Transform:
         '''
             Select a destination outside the specified radius from current position
         '''
@@ -155,7 +154,7 @@ class RandomScenario():
             des_wp = self.carla_map.get_waypoint(des_transform.location,
                                                  project_to_road=False)
             distance = ego_curr_point.location.distance(des_transform.location)
-            if distance < radius:
+            if distance < min_radius or distance > max_radius:
                 continue
             if des_wp.is_junction:
                 continue
@@ -371,7 +370,7 @@ class RandomScenario():
             time.sleep(0.1)
             wait_time -= 0.1
 
-        dest_tf = self.select_valid_dest()
+        dest_tf = self.select_valid_dest(50, 100)
         if dest:
             dest_tf = dest
         self.destination = dest_tf
@@ -457,7 +456,7 @@ class RandomScenario():
         times = 0
         success = False
         self.dv.disable_apollo()
-        self.destination = self.select_valid_dest()
+        self.destination = self.select_valid_dest(50, 100)
         while times < 3:
             try:
                 time.sleep(2)
@@ -465,7 +464,7 @@ class RandomScenario():
                 self.dv.set_vehicle(self.cfgs.dreamview_vehicle)
                 self.dv.set_setup_mode('Mkz Standard Debug')
 
-                self.result_to_save['end_loc'] = {
+                self.result_saver.result_to_save['end_loc'] = {
                     'x': self.destination.location.x,
                     'y': self.destination.location.y,
                     'z': self.destination.location.z
@@ -498,6 +497,7 @@ class RandomScenario():
 
         if not os.path.exists(self.sim_result_path):
             os.makedirs(self.sim_result_path)
+
         self.recorder = ScenarioRecorder(self.carla_world,
                                          self.ego_vehicle,
                                          self.result_path)
@@ -514,101 +514,25 @@ class RandomScenario():
             return
         self.on_unsafe_lock = True
 
-        triger_time = time.time()
-        time_pass = triger_time - self.result_to_save['start_time']
-        time_pass_str = str(timedelta(seconds=time_pass))
+        trigger_time = time.time()
+        time_pass = trigger_time - self.result_saver.result_to_save['start_time']
+        # time_pass_str = str(timedelta(seconds=time_pass))
         if time_pass < 5:
             self.on_unsafe_lock = False
             return
 
-        if type == UNSAFE_TYPE.ACCELERATION:
-            if self.result_to_save['minor_unsafe'] and \
-                    'unsafe_acc' in self.result_to_save['minor_unsafe']:
-                if data == self.result_to_save['minor_unsafe']['unsafe_acc'][-1]['acc']:
-                    self.on_unsafe_lock = False
-                    return
-                self.result_to_save['minor_unsafe']['unsafe_acc'].append({
-                    'time': time_pass,
-                    'time_str': time_pass_str,
-                    'acc': data
-                })
-            elif self.result_to_save['minor_unsafe'] and \
-                    'unsafe_acc' not in self.result_to_save['minor_unsafe']:
-                self.result_to_save['minor_unsafe']['unsafe_acc'] = [{
-                    'time': time_pass,
-                    'time_str': time_pass_str,
-                    'acc': data
-                }]
-            else:
-                self.result_to_save['minor_unsafe'] = {
-                    'unsafe_acc': [{
-                        'time': time_pass,
-                        'time_str': time_pass_str,
-                        'acc': data
-                    }]
-                }
+        if type in [UNSAFE_TYPE.ACCELERATION,
+                    UNSAFE_TYPE.LANE_CHANGE,
+                    UNSAFE_TYPE.CROSSING_SOLID_LANE]:
+            self.result_saver.add_minor_unsafe(type, data, trigger_time)
             self.on_unsafe_lock = False
             return
 
-        if type == UNSAFE_TYPE.LANE_CHANGE:
-            if self.result_to_save['minor_unsafe'] and \
-                    'lanechange_timeout' in self.result_to_save['minor_unsafe']:
-                self.result_to_save['minor_unsafe']['lanechange_timeout'].append({
-                    'time': time_pass,
-                    'time_str': time_pass_str
-                })
-            elif self.result_to_save['minor_unsafe'] and \
-                    'lanechange_timeout' not in self.result_to_save['minor_unsafe']:
-                self.result_to_save['minor_unsafe']['lanechange_timeout'] = [{
-                    'time': time_pass,
-                    'time_str': time_pass_str
-                }]
-            else:
-                self.result_to_save['minor_unsafe'] = {
-                    'lanechange_timeout': [{
-                        'time': time_pass,
-                        'time_str': time_pass_str
-                    }]
-                }
-            self.on_unsafe_lock = False
-            return
-
-        if type == UNSAFE_TYPE.CROSSING_SOLID_LANE:
-            lane_type_str = 'Other'
-            if data == 1:
-                lane_type_str = 'Solid Lane'
-            if data == 2:
-                lane_type_str = 'Solid Solid Lane'
-            if self.result_to_save['minor_unsafe'] and \
-                    'crossing_solid_lane' in self.result_to_save['minor_unsafe']:
-                self.result_to_save['minor_unsafe']['crossing_solid_lane'].append({
-                    'time': time_pass,
-                    'time_str': time_pass_str,
-                    'crossing': lane_type_str
-                })
-            elif self.result_to_save['minor_unsafe'] and \
-                    'crossing_solid_lane' not in self.result_to_save['minor_unsafe']:
-                self.result_to_save['minor_unsafe']['crossing_solid_lane'] = [{
-                    'time': time_pass,
-                    'time_str': time_pass_str,
-                    'crossing': lane_type_str
-                }]
-            else:
-                self.result_to_save['minor_unsafe'] = {
-                    'crossing_solid_lane': [{
-                        'time': time_pass,
-                        'time_str': time_pass_str,
-                        'crossing': lane_type_str
-                    }]
-                }
-            self.on_unsafe_lock = False
-            return
-
-        self.result_to_save['unsafe'] = True
-        self.result_to_save['unsafe_type'] = UNSAFE_TYPE.type_str[type]
+        self.result_saver.result_to_save['unsafe'] = True
+        self.result_saver.result_to_save['unsafe_type'] = UNSAFE_TYPE.type_str[type]
         logger.info('reload')
 
-        self.save_result(save_video=True)
+        self.stop_record_and_save(save_video=True)
 
         near_by_tf = self.carla_map.get_waypoint(
             self.ego_vehicle.get_location()).transform
@@ -632,23 +556,6 @@ class RandomScenario():
         self.on_unsafe_lock = False
 
     def start_record(self):
-        self.clear_result()
-        curr_loc = self.ego_vehicle.get_location()
-        self.result_to_save['start_loc'] = {
-            'x': curr_loc.x,
-            'y': curr_loc.y,
-            'z': curr_loc.z
-        }
-        self.result_to_save['dest_loc'] = {
-            'x': self.destination.location.x,
-            'y': self.destination.location.y,
-            'z': self.destination.location.z
-        }
-
-        self.result_to_save['start_time'] = time.time()
-
-        self.frames_record = []
-
         sce_result_path = os.path.join(
             self.sim_result_path, f'Scenario_{self.sce_index}')
 
@@ -658,121 +565,38 @@ class RandomScenario():
         self.sce_result_path = sce_result_path
 
         sce_video_path = os.path.join(sce_result_path, 'recorder.mp4')
-        self.result_to_save['video_path'] = sce_video_path
+
+        self.result_saver.set_save_path(sce_result_path)
+
+        self.result_saver.result_to_save['video_path'] = sce_video_path
+
+        self.result_saver.clear_result()
+
+        curr_loc = self.ego_vehicle.get_location()
+        self.result_saver.result_to_save['start_loc'] = {
+            'x': curr_loc.x,
+            'y': curr_loc.y,
+            'z': curr_loc.z
+        }
+        self.result_saver.result_to_save['dest_loc'] = {
+            'x': self.destination.location.x,
+            'y': self.destination.location.y,
+            'z': self.destination.location.z
+        }
+
+        self.result_saver.result_to_save['start_time'] = time.time()
 
         self.recorder.start_recording(save_path=sce_video_path)
 
         self.is_recording = True
         self.recorder_start_time = time.time()
 
-    def save_result(self, save_video=True):
-        if self.is_recording:
-            self.is_recording = False
-        self.result_to_save['end_loc'] = {
-            'x': self.ego_vehicle.get_location().x,
-            'y': self.ego_vehicle.get_location().y,
-            'z': self.ego_vehicle.get_location().z
-        }
-
-        now = time.time()
-        self.result_to_save['end_time'] = now
-        self.result_to_save['run_time'] = now - \
-            self.result_to_save['start_time']
-
-        if not self.frames_record or len(self.frames_record) == 0:
-            self.result_to_save['interaction'] = None
-            self.result_to_save['Odometer'] = None
-        else:
-            ego_pos_l = []
-            run_distance = 0.0
-            interaction_per_frame = []
-            total_frame_num = len(self.frames_record)
-
-            will_collide_frame_cnt = 0
-
-            pre_frame = None
-
-            for frame in self.frames_record:
-                ego_ss = frame['ego_ss']
-                npcs_ss = frame['npc_vehicles_ss']
-                ego_pos_l.append({
-                    'timestamp': frame['timestamp'],
-                    'frame_num': frame['frame'],
-                    'x': ego_ss.get_transform().location.x,
-                    'y': ego_ss.get_transform().location.y,
-                    'z': ego_ss.get_transform().location.z,
-                    'yaw': ego_ss.get_transform().rotation.yaw,
-                    'pitch': ego_ss.get_transform().rotation.pitch,
-                    'roll': ego_ss.get_transform().rotation.roll,
-                    'speed': ego_ss.get_velocity().length(),
-                    'run_distance': round(run_distance, 2)
-                })
-
-                if pre_frame:
-                    pre_ego_ss = pre_frame['ego_ss']
-                    delta_dis = abs(ego_ss.get_transform().location.distance(
-                        pre_ego_ss.get_transform().location))
-                    run_distance += delta_dis
-
-                pre_colli_cunt = 0
-                this_frame_has_colli = False
-                for npc_ss in npcs_ss:
-                    will_collide, t = predict_collision(ego_ss, npc_ss)
-                    pre_colli_cunt += 1 if will_collide else 0
-                    if will_collide:
-                        this_frame_has_colli = True
-
-                will_collide_frame_cnt += 1 if this_frame_has_colli else 0
-                will_collide_rate = pre_colli_cunt / \
-                    len(npcs_ss) if npcs_ss else 0
-
-                interaction_per_frame.append({
-                    'timestamp': frame['timestamp'],
-                    'frame_num': frame['frame'],
-                    'interaction_rate': will_collide_rate
-                })
-
-                pre_frame = frame
-
-            self.result_to_save['Odometer'] = {
-                'total_distance': round(run_distance, 2),
-                'pos_per_frame': ego_pos_l
-            }
-            self.result_to_save['interaction'] = {
-                'interact_frame_rate': will_collide_frame_cnt / total_frame_num,
-                'per_frame': interaction_per_frame
-            }
+    def stop_record_and_save(self, save_video=True):
         if save_video:
             time.sleep(1)
         self.recorder.stop_recording()
-        try:
-            resule_str = json.dumps(self.result_to_save, indent=4)
-            result_path = os.path.join(self.sce_result_path, 'result.json')
-            with open(result_path, 'w') as f:
-                f.write(resule_str)
-            if not save_video:
-                if os.path.isfile(self.result_to_save['video_path']):
-                    os.remove(self.result_to_save['video_path'])
-                    self.result_to_save['video_path'] = 'deleted'
-        except Exception as e:
-            print(e)
-
-    def clear_result(self):
-        self.result_to_save = {}
-        self.result_to_save = {
-            'unsafe': False,
-            'unsafe_type': None,
-            'minor_unsafe': [],
-            'start_loc': None,
-            'dest_loc': None,
-            'end_loc': None,
-            'start_time': time.time(),
-            'end_time': None,
-            'run_time': None,
-            'interaction': None,
-            'video_path': None,
-            'Odometer': None,
-        }
+        curr_loc = self.ego_vehicle.get_location()
+        self.result_saver.save_result(curr_loc, save_video)
 
     def main_loop(self):
         self.sim_status = True
@@ -788,16 +612,16 @@ class RandomScenario():
                     if not self.loading_random_scenario and self.random_scenario:
                         eval_frame = self.random_scenario.evaluate_snapshot_record(
                             world_ss)
-                        self.frames_record.append(eval_frame)
+                        self.result_saver.frames_record.append(eval_frame)
                         self.random_scenario.npc_refresh()
                     continue
                 print('\r')
                 print('reach des')
                 # Sce end
-                self.save_result(save_video=False)
+                self.stop_record_and_save(save_video=False)
 
                 # Next sce
-                self.destination = self.select_valid_dest()
+                self.destination = self.select_valid_dest(50, 100)
 
                 time.sleep(5)
                 if not self.sim_status:
@@ -820,7 +644,7 @@ class RandomScenario():
             if not self.loading_random_scenario and self.random_scenario:
                 eval_frame = self.random_scenario.evaluate_snapshot_record(
                     world_ss)
-                self.frames_record.append(eval_frame)
+                self.result_saver.frames_record.append(eval_frame)
                 self.random_scenario.npc_refresh()
 
     def load_random_scenario(self):
@@ -873,12 +697,11 @@ class RandomScenario():
     def close(self):
         logger.warning("Shutting down.")
 
-        close_timeout_timer = SimulationTimeoutTimer(10, timeoutfail)
-        
-        def timeoutfail():
-            logger.warning("close timeout")
-            sys.exit()
-        
+        def exit_program():
+            logger.warning("Force Exiting program due to timeout.")
+            os.kill(os.getpid(), signal.SIGTERM)
+        close_timeout_timer = SimulationTimeoutTimer(10, exit_program)
+
         close_timeout_timer.start()
         if self.recorder:
             self.recorder.stop_recording()
@@ -923,6 +746,7 @@ class RandomScenario():
             self.carla_client = None
             logger.warning("[Shutdown] Carla client destroied")
         close_timeout_timer.cancel()
+        os.kill(os.getpid(), signal.SIGTERM)
 
 
 if __name__ == '__main__':
