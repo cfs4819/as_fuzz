@@ -8,17 +8,17 @@ from MS_fuzz.ga_engine.gene import GeneNpcWalkerList, GeneNpcVehicleList
 
 
 class Evaluate_Object:
-    def __init__(self, 
-                 walker_ind: GeneNpcWalkerList, 
+    def __init__(self,
+                 walker_ind: GeneNpcWalkerList,
                  vehicle_ind: GeneNpcVehicleList,
-                 id=('','')):
+                 id=('', '')):
         self.walker_ind: GeneNpcWalkerList = walker_ind
         self.vehicle_ind: GeneNpcVehicleList = vehicle_ind
-        if id[0]==id[1]:
+        if id[0] == id[1]:
             self.id = id[0]
         else:
-            self.id = id[0]+'_'+id[1]
-        
+            self.id = id[0] + '_' + id[1]
+
         self.is_evaluated = False
 
         self.f_crossing_time = 0
@@ -80,17 +80,18 @@ class Evaluate_Object:
 
         self.f_distance = f_distance
         self.f_smooth = f_unsmooth_acc
-        self.f_crossing_time = walker_in_road_count/len(self.frame_recorded)
-        self.f_interaction_rate = vehicle_may_collide/len(self.frame_recorded)
+        self.f_crossing_time = walker_in_road_count / len(self.frame_recorded)
+        self.f_interaction_rate = vehicle_may_collide / \
+            len(self.frame_recorded)
 
         self.walker_ind.fitness.values = (self.f_distance,
-                                   self.f_smooth,
-                                   self.f_diversity,
-                                   self.f_crossing_time)
+                                          self.f_smooth,
+                                          self.f_diversity,
+                                          self.f_crossing_time)
         self.vehicle_ind.fitness.values = (self.f_distance,
-                                    self.f_smooth,
-                                    self.f_diversity,
-                                    self.f_interaction_rate)
+                                           self.f_smooth,
+                                           self.f_diversity,
+                                           self.f_interaction_rate)
         self.is_evaluated = True
 
     def predict_collision(self,
@@ -111,27 +112,27 @@ class Evaluate_Object:
         for t in np.arange(0, prediction_time, time_step):
             # Update positions
             future_pos1 = carla.Location(
-                x=position1.x + (velocity1.x * t) + 0.5 *
-                acceleration1.x * t**2,
-                y=position1.y + (velocity1.y * t) + 0.5 *
-                acceleration1.y * t**2,
-                z=position1.z + (velocity1.z * t) + 0.5 *
-                acceleration1.z * t**2
+                x=position1.x + (velocity1.x * t) + 0.5
+                * acceleration1.x * t**2,
+                y=position1.y + (velocity1.y * t) + 0.5
+                * acceleration1.y * t**2,
+                z=position1.z + (velocity1.z * t) + 0.5
+                * acceleration1.z * t**2
             )
 
             future_pos2 = carla.Location(
-                x=position2.x + (velocity2.x * t) + 0.5 *
-                acceleration2.x * t**2,
-                y=position2.y + (velocity2.y * t) + 0.5 *
-                acceleration2.y * t**2,
-                z=position2.z + (velocity2.z * t) + 0.5 *
-                acceleration2.z * t**2
+                x=position2.x + (velocity2.x * t) + 0.5
+                * acceleration2.x * t**2,
+                y=position2.y + (velocity2.y * t) + 0.5
+                * acceleration2.y * t**2,
+                z=position2.z + (velocity2.z * t) + 0.5
+                * acceleration2.z * t**2
             )
 
             # Calculate distance between future positions
-            dist = math.sqrt((future_pos1.x - future_pos2.x)**2 +
-                             (future_pos1.y - future_pos2.y)**2 +
-                             (future_pos1.z - future_pos2.z)**2)
+            dist = math.sqrt((future_pos1.x - future_pos2.x)**2
+                             + (future_pos1.y - future_pos2.y)**2
+                             + (future_pos1.z - future_pos2.z)**2)
 
             # Check for potential collision
             if dist < collision_distance:
