@@ -164,6 +164,7 @@ class ResultSaver(object):
 
             pre_frame = None
 
+            # final_frame_time = self.frames_record[-1]['timestamp']
             for frame in self.frames_record:
                 ego_ss = frame['ego_ss']
                 npcs_ss = frame['npc_vehicles_ss']

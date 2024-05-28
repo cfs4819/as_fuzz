@@ -636,6 +636,8 @@ class LocalScenario(object):
         '''
         frame = world_snapshot.frame
         ego_ss = world_snapshot.find(self.ego.id)
+        if not ego_ss:
+            return
         npc_vehicles_ss = []
         for vehicle in self.npc_vehicle_list:
             if not vehicle.vehicle:

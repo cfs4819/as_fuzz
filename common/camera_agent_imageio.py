@@ -180,6 +180,9 @@ class ScenarioRecorder:
             (self.height * 2, self.width * 2, 3), dtype=np.uint8)
 
     def __del__(self):
+        self.rm_cams()
+    
+    def rm_cams(self):
         if self.top_cam.is_listening:
             self.top_cam.stop()
         if self.tpp_cam.is_listening:
