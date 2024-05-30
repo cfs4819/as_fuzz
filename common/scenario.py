@@ -479,6 +479,8 @@ class LocalScenario(object):
             self.evaluate_obj.evaluate()
 
         self.running = False
+        if self.evaluate_obj:
+            return self.evaluate_obj
 
     def vehicle_control_handler(self, vehicle: NpcVehicle):
         while not vehicle.close_event.is_set():
@@ -596,7 +598,7 @@ class LocalScenario(object):
                     walker.walker.destroy()
                 # self.npc_walker_list.remove(walker)
             self.npc_walker_list = []
-
+            self.carla_world.wait_for_tick()
         except:
             pass
 
@@ -637,7 +639,7 @@ class LocalScenario(object):
         frame = world_snapshot.frame
         ego_ss = world_snapshot.find(self.ego.id)
         if not ego_ss:
-            return
+            return None
         npc_vehicles_ss = []
         for vehicle in self.npc_vehicle_list:
             if not vehicle.vehicle:
@@ -651,6 +653,8 @@ class LocalScenario(object):
 
         min_dis = 9999
         for npc in npc_vehicles_ss + npc_walkers_ss:
+            if ego_ss == None:
+                return None
             dis = ego_ss.get_transform().location.distance(npc.get_transform().location)
             if dis < min_dis:
                 min_dis = dis

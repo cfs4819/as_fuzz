@@ -4,57 +4,83 @@ import time
 import numpy as np
 import threading
 import random
-import math
-# import pygame
+import sys
+import queue
+import signal
 
 from datetime import datetime
 from typing import Dict
 from loguru import logger
+from multiprocessing import Queue
 
-# from common import utils
-# from common.frame import CaseRecorder, FrameElement, FrameEventType, CaseFaultType
 from MS_fuzz.fuzz_config.Config import Config
 from MS_fuzz.ms_utils import calc_relative_loc
 from carla_bridge.apollo_carla_bridge import CarlaCyberBridge
+from carla_bridge.utils.transforms import carla_transform_to_cyber_pose
 from carla_bridge.utils.logurus import init_log
 from carla_bridge.dreamview_carla import dreamview
 
-from scenario import LocalScenario
+from MS_fuzz.common.scenario import LocalScenario
+from MS_fuzz.common.camera_agent_imageio import ScenarioRecorder
+from MS_fuzz.common.unsafe_detector import UNSAFE_TYPE, UnsafeDetector
+from MS_fuzz.common.evaluate import Evaluate_Object, Evaluate_Transfer
 from MS_fuzz.ga_engine.scene_segmentation import SceneSegment
-from MS_fuzz.ga_engine.cega import CEGA
+from MS_fuzz.common.result_saver import ResultSaver
 
 import pdb
 
-from agents.tools.misc import draw_waypoints
+
+class SimulationTimeoutTimer:
+    def __init__(self, timeout, callback):
+        self.timeout = timeout
+        self.callback = callback
+        self.timer = None
+        self.lock = threading.Lock()
+
+    def _run(self):
+        with self.lock:
+            self.timer = None
+            self.callback()
+
+    def start(self):
+        with self.lock:
+            if self.timer is not None:
+                self.timer.cancel()
+            self.timer = threading.Timer(self.timeout, self._run)
+            self.timer.start()
+
+    def reset(self):
+        self.start()
+
+    def cancel(self):
+        with self.lock:
+            if self.timer is not None:
+                self.timer.cancel()
+                self.timer = None
 
 
 class Simulator(object):
 
-    def __init__(self, cfgs: Config):
+    def __init__(self, cfgs: Config,
+                 eva_req_queue: Queue = None,
+                 eva_res_queue: Queue = None):
         self.carla_client = None
         self.carla_world = None
         self.carla_map = None
         self.ego_vehicle = None
-        self.destination = None
-        self.carla_bridge: CarlaCyberBridge = None
-        self.carla_bridge_thread = None
-        # self.async_flag = cfgs.sim_mode
-        self.cfgs: Config = cfgs
 
-        self.mutated_npc_list = []
-        self.yellow_lines = []
-        self.cross_lines = []
-        self.edge_lines = []
+        self.destination = None
+
+        self.carla_bridge_thread = None
+        self.cfgs: Config = cfgs
 
         self.sim_status = False
 
-        # self.connect_lgsvl()
-        # self.load_map(self.lgsvl_map)
+        self.ego_spawn_loc = None
 
         self.simulation_count = 0
 
         self.modules = [
-            # 'Localization',  # ok
             'Transform',  # ok
             'Routing',
             'Prediction',  # ok
@@ -63,17 +89,29 @@ class Simulator(object):
             'Storytelling'  # ok
         ]
 
-        if cfgs.load_bridge:
-            self.carla_bridge = CarlaCyberBridge()
+        self.carla_bridge = CarlaCyberBridge()
+        self.dv: dreamview.Connection = None
 
         self.curr_local_scenario: LocalScenario = None
         self.next_local_scenario: LocalScenario = None
         self.prev_local_scenario: LocalScenario = None
         self.scene_segmentation: SceneSegment = None
 
-        self.ga_lib: Dict[str, CEGA] = {}
+        # self.ga_lib: Dict[str, CEGA] = ga_lib
+        self.eva_req_queue = eva_req_queue
+        self.eva_res_queue = eva_res_queue
 
         self.close_event = threading.Event()
+        self.closing = False
+        self.closed = False
+
+        self.recorder: ScenarioRecorder = None
+        self.unsafe_detector: UnsafeDetector = None
+        self.result_saver: ResultSaver = ResultSaver()
+        self.is_recording = False
+
+        self.on_unsafe_lock = False
+        self.start_unsafe_callback = False
 
     def carla_bridge_handler(self, ego_spawn_point: dict = None):
         try:
@@ -93,20 +131,21 @@ class Simulator(object):
                     }
                 }
             }
-            self.carla_bridge.ego_spawn_point = ego_spawn_point
-            self.carla_bridge.initialize_bridge(
-                self.carla_world, parameters, logger)
+            self.carla_bridge.ego_initial_pos = ego_spawn_point
+            self.carla_bridge.initialize_bridge(self.carla_world,
+                                                parameters,
+                                                logger)
+
         except (IOError, RuntimeError) as e:
             logger.error(f"[Bridge] Error: {e}")
-        except KeyboardInterrupt as e:      # if keyboard signal is catched, this try should be deleted
+        except KeyboardInterrupt as e:
             logger.error(f"[Bridge] Error: {e}")
         except Exception as e:  # pylint: disable=W0718
             logger.error(e)
         finally:
-            if self.carla_client:
-                self.close()
+            self.close()
 
-    def load_carla_bridge(self, ego_spawn_point: dict = None):
+    def load_carla_bridge(self, ego_spawn_loc: dict = None):
         '''
             parameter: 
                 ego_spawn_point: the point ego vehicle to spawn
@@ -120,115 +159,135 @@ class Simulator(object):
                     }
             return: None
         '''
+        logger.info("Loading bridge")
+        sp_dic = None
+        if ego_spawn_loc:
+            sp_wp = self.carla_map.get_waypoint(carla.Location(x=ego_spawn_loc['x'],
+                                                               y=-ego_spawn_loc['y'],
+                                                               z=ego_spawn_loc['z']))
+            sp_tf = sp_wp.transform
+            sp_pose = carla_transform_to_cyber_pose(sp_tf)
+            sp_dic = {"x": sp_pose.position.x,
+                      "y": sp_pose.position.y,
+                      "z": sp_pose.position.z + 2,
+                      "roll": sp_tf.rotation.roll,
+                      "pitch": sp_tf.rotation.pitch,
+                      "yaw": -sp_tf.rotation.yaw}
         if self.carla_world == None:
-            logger.error(
-                "[Bridge] carla needed to be connected before loading bridge")
+            logger.error("[Bridge] carla needed to be connected \
+                    before loading bridge")
             return
-        self.carla_bridge_thread = threading.Thread(
-            target=self.carla_bridge_handler,
-            args=(ego_spawn_point,))
+        self.carla_bridge_thread = threading.Thread(target=self.carla_bridge_handler,
+                                                    args=(sp_dic,))
         self.carla_bridge_thread.start()
 
-    def connect_carla(self):
+    def connect_carla(self, reload_world=True):
         '''
         Connect to carla simualtor.
         '''
-        if (self.carla_client != None and
-                self.carla_world != None):
+        if (self.carla_client != None
+                and self.carla_world != None):
             logger.warning("Connection already exists")
             return
         try:
             logger.info(
                 f"[Simulator] Connecting to Carla on {self.cfgs.sim_host} {self.cfgs.sim_port}")
-            self.carla_client = carla.Client(
-                host=self.cfgs.sim_host, port=self.cfgs.sim_port
-            )
+            self.carla_client = carla.Client(host=self.cfgs.sim_host,
+                                             port=self.cfgs.sim_port)
             self.carla_client.set_timeout(self.cfgs.load_world_timeout)
-            if self.cfgs.load_bridge:
-                self.carla_client.load_world(self.cfgs.carla_map)
             self.carla_world = self.carla_client.get_world()
+            curr_map_name = self.carla_world.get_map().name.split('/')[-1]
+            curr_map_name = curr_map_name.lower()
+            if reload_world or not curr_map_name in [self.cfgs.carla_map.lower(),
+                                                     (self.cfgs.carla_map + '_Opt').lower()]:
+                self.carla_world = self.carla_client.load_world(
+                    self.cfgs.carla_map)
             self.carla_map = self.carla_world.get_map()
 
         except Exception as e:
             logger.error(f'[Simulator] Connect Carla wrong: {e}')
+            self.close()
         except KeyboardInterrupt as e:
             logger.error('[Simulator]KeyboardInterrupt: {e.message}')
             self.close()
-            return
         logger.info(
-            f'[Simulator] Connected {self.cfgs.sim_host} {self.cfgs.sim_port}')
-        if self.cfgs.load_bridge:
-            # if load_bridge, ego_vehicle can only found after bridge is loaded.
-            return
-        all_vehicles = self.carla_world.get_actors().filter("*vehicle.*")
-        ego_existed = False
-        for vehicle in all_vehicles:
-            if vehicle.attributes["role_name"] == "ego_vehicle":
-                self.ego_vehicle = vehicle
-                ego_existed = True
-                break
-        if not ego_existed:
-            logger.error("[Simulator] Can't find ego_vehicle.\
-                         Check if carla_bridge is running properly.")
-            self.close()
+            f'[Simulator] Connected {self.cfgs.sim_host}:{self.cfgs.sim_port}')
 
     def init_environment(self) -> bool:
         self.connect_carla()
-        if self.cfgs.load_bridge:
-            logger.info("Loading bridge")
-            self.load_carla_bridge()
-            time.sleep(2)
-            retry_times = 0
-            self.ego_vehicle = None
-            while True:
-                print("[*] Waiting for carla_bridge " +
-                      "." * retry_times + "\r", end="")
-                vehicles = self.carla_world.get_actors().filter("*vehicle.*")
-                for vehicle in vehicles:
-                    if vehicle.attributes["role_name"] == "ego_vehicle":
-                        self.ego_vehicle = vehicle
-                        break
-                if self.ego_vehicle:
+
+        self.load_carla_bridge(ego_spawn_loc=self.ego_spawn_loc)
+        time.sleep(2)
+        retry_times = 0
+        self.ego_vehicle = None
+        while True:
+            print("[*] Waiting for carla_bridge "
+                  + "." * retry_times + "\r", end="")
+            vehicles = self.carla_world.get_actors().filter("*vehicle.*")
+            for vehicle in vehicles:
+                if vehicle.attributes["role_name"] == "ego_vehicle":
+                    self.ego_vehicle = vehicle
                     break
-                if retry_times > 5:
-                    print("\n check if the carla_bridge is loaded properly")
-                    self.close()
-                    return False
-                retry_times += 1
-                time.sleep(2)
+            if self.ego_vehicle:
+                break
+            if retry_times > 5:
+                print("\n check if the carla_bridge is loaded properly")
+                self.close()
+                return False
+            retry_times += 1
+            time.sleep(2)
+        self.dv = dreamview.Connection(
+            self.ego_vehicle,
+            ip=self.cfgs.dreamview_ip,
+            port=str(self.cfgs.dreamview_port))
         return True
 
     def initialization(self):
         now = datetime.now()
-        date_time = now.strftime("%m-%d-%Y-%H-%M-%S")
-        logger.info(
-            '[Simulator] === Simulation Start:  [' + date_time + '] ===')
+        date_time = now.strftime("%Y%m%d_%H%M%S")
+        logger.info('[Simulator] === Simulation Start:  \
+                [' + date_time + '] ===')
 
         self.simulation_count += 1
-        # time.sleep(1)
 
         if not self.init_environment():
-            return
+            sys.exit()
 
-        self.scene_segmentation = SceneSegment(
-            self.carla_world, self.ego_vehicle, logger=logger, debug=True)
+        self.freeze_and_set_green_all_tls()
+
+        curr_datetime = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.result_path = os.path.join(self.cfgs.out_dir, curr_datetime)
+
+        if not os.path.exists(self.result_path):
+            os.makedirs(self.result_path)
+
+        self.recorder = ScenarioRecorder(self.carla_world,
+                                         self.ego_vehicle,
+                                         self.result_path)
+
+        self.unsafe_detector = UnsafeDetector(self.carla_world,
+                                              self.ego_vehicle)
+
+        self.unsafe_detector.register_callback(self.on_unsafe)
+        self.unsafe_detector.init_sensors()
+
+        self.scene_segmentation = SceneSegment(self.carla_world,
+                                               self.ego_vehicle,
+                                               logger=logger,
+                                               debug=False)
+
         self.scene_segmentation.routing_listener.start()
 
         times = 0
         success = False
-        dv: dreamview.Connection = None
         while times < 3:
             try:
-                dv = dreamview.Connection(
-                    self.ego_vehicle,
-                    ip=self.cfgs.dreamview_ip,
-                    port=str(self.cfgs.dreamview_port))
                 time.sleep(2)
-                dv.set_hd_map(self.cfgs.dreamview_map)
-                dv.set_vehicle(self.cfgs.dreamview_vehicle)
-                dv.set_setup_mode('Mkz Standard Debug')
+                self.dv.set_hd_map(self.cfgs.dreamview_map)
+                self.dv.set_vehicle(self.cfgs.dreamview_vehicle)
+                self.dv.set_setup_mode('Mkz Standard Debug')
                 self.destination = self.select_valid_dest()
-                dv.enable_apollo(self.destination, self.modules)
+                self.dv.enable_apollo(self.destination, self.modules)
                 success = True
                 break
             except:
@@ -237,12 +296,12 @@ class Simulator(object):
                 times += 1
         if not success:
             raise RuntimeError('Fail to spin up apollo')
-        dv.set_destination_tranform(self.destination)
+        self.dv.set_destination_tranform(self.destination)
         route_req_time = time.time()
         logger.info(
-            '[Simulator] Set Apollo (EGO) destination: ' +
-            str(self.destination.location.x) +
-            ',' + str(self.destination.location.y))
+            '[Simulator] Set Apollo (EGO) destination: '
+            + str(self.destination.location.x)
+            + ',' + str(self.destination.location.y))
 
         self.sim_status = True
         synchronous_mode = self.carla_world.get_settings().synchronous_mode
@@ -255,36 +314,159 @@ class Simulator(object):
         if not self.scene_segmentation.wait_for_route(
                 route_req_time, wait_from_req_time=True):
             raise KeyboardInterrupt
-        self.scene_segmentation.get_segments(
-            cfg.scenario_length, cfg.scenario_width)
+        self.scene_segmentation.get_segments(self.cfgs.scenario_length,
+                                             self.cfgs.scenario_width)
         self.scene_segmentation.routing_listener.stop()
 
         self.scene_segmentation.strat_vehicle_pos_listening()
 
-        dv.disconnect()
+        self.unsafe_detector.start_detection()
+
+    def on_unsafe(self, type, message, data=None):
+        if self.on_unsafe_lock:
+            return
+        self.on_unsafe_lock = True
+        '''
+            COLLISION 
+            CROSSING_SOLID_LANE 
+            LANE_CHANGE 
+            STUCK 
+            ACCELERATION
+        '''
+        trigger_time = time.time()
+        time_pass = trigger_time - \
+            self.result_saver.result_to_save['start_time']
+        if type == UNSAFE_TYPE.COLLISION:
+            if time_pass > 5:
+                logger.info(f'[Unsafe Detected]: {message}')
+                self.result_saver.result_to_save['unsafe'] = True
+                self.result_saver.result_to_save['unsafe_type'] = UNSAFE_TYPE.type_str[type]
+                logger.info('reload')
+                self.stop_record_and_save(save_video=True)
+                self.close()
+                logger.info('closed')
+        elif type in [UNSAFE_TYPE.LANE_CHANGE,
+                      UNSAFE_TYPE.CROSSING_SOLID_LANE]:
+            if self.start_unsafe_callback:
+                logger.info(f'[Unsafe Detected]: {message}')
+                if time_pass > 5:
+                    self.result_saver.add_minor_unsafe(
+                        type, data, trigger_time)
+        elif type == UNSAFE_TYPE.ACCELERATION:
+            if self.start_unsafe_callback:
+                if time_pass > 5:
+                    self.result_saver.add_minor_unsafe(
+                        type, data, trigger_time)
+        elif type == UNSAFE_TYPE.STUCK:
+            if time_pass < 60 :
+                self.on_unsafe_lock = False
+                return
+            if self.next_local_scenario != None:
+                logger.info('Stucked, try start next scenario')
+                if not self.next_local_scenario.running:
+                    # try start next scenario
+                    self.next_local_scenario.scenario_start()
+                    self.on_unsafe_lock = False
+                    return
+            logger.info(f'[Unsafe Detected]: {message}')
+            self.result_saver.result_to_save['unsafe'] = True
+            self.result_saver.result_to_save['unsafe_type'] = UNSAFE_TYPE.type_str[type]
+            logger.info('reload')
+            self.stop_record_and_save(save_video=True)
+            self.close()
+        self.on_unsafe_lock = False
+        return
+
+    def start_record(self, id=None):
+        self.result_saver.clear_result()
+        if id == None:
+            sce_result_path = os.path.join(self.result_path,
+                                           f'Scenario_{self.scene_segmentation.curr_seg_index}')
+        else:
+            sce_result_path = os.path.join(self.result_path,
+                                           f'Scenario_{id}')
+        if not os.path.exists(sce_result_path):
+            os.makedirs(sce_result_path)
+
+        self.sce_result_path = sce_result_path
+
+        sce_video_path = os.path.join(sce_result_path, 'recorder.mp4')
+
+        self.result_saver.set_save_path(sce_result_path)
+
+        self.result_saver.result_to_save['video_path'] = sce_video_path
+
+        curr_loc = self.ego_vehicle.get_location()
+        self.result_saver.result_to_save['start_loc'] = {
+            'x': curr_loc.x,
+            'y': curr_loc.y,
+            'z': curr_loc.z
+        }
+        self.result_saver.result_to_save['dest_loc'] = {
+            'x': self.destination.location.x,
+            'y': self.destination.location.y,
+            'z': self.destination.location.z
+        }
+
+        self.result_saver.result_to_save['start_time'] = time.time()
+
+        self.recorder.start_recording(save_path=sce_video_path)
+
+        self.is_recording = True
+        self.recorder_start_time = time.time()
+
+        self.start_unsafe_callback = True
+
+    def stop_record_and_save(self, save_video=True):
+        if not self.is_recording:
+            return
+        self.is_recording = False
+        self.start_unsafe_callback = False
+        if save_video:
+            time.sleep(1)
+        self.recorder.stop_recording()
+        curr_loc = self.ego_vehicle.get_location()
+        self.result_saver.save_result(curr_loc, save_video)
+
+    def freeze_and_set_green_all_tls(self):
+        traffic_lights = self.carla_world.get_actors().filter('traffic.traffic_light')
+        for tl in traffic_lights:
+            tl.set_state(carla.TrafficLightState.Green)
+            tl.freeze(True)
+        logger.info('[Simulator] freeze and set green all tls')
+
+    def wait_until_vehicle_moving(self, timeout=5.0):
+        to = timeout
+        while to > 0:
+            curr_speed = self.ego_vehicle.get_velocity().x
+            print(f'curr speed : {int(curr_speed*100)/100}\r', end='')
+            if curr_speed > 0.01 or curr_speed < -0.01:
+                return True
+            time.sleep(0.1)
+            to -= 0.1
+        return False
+
+    def check_if_ego_close_dest(self, radius=5):
+        if not self.ego_vehicle:
+            return False
+        dis = self.ego_vehicle.get_location().distance(
+            self.destination.location)
+        print(f'distance to destination: {int(dis)} \r', end='')
+        if dis < radius:
+            return True
+        else:
+            return False
 
     def main_loop(self):
-        dv: dreamview.Connection = dreamview.Connection(
-            self.ego_vehicle,
-            ip=self.cfgs.dreamview_ip,
-            port=str(self.cfgs.dreamview_port))
-
-        logger.info('scene_segmentation.curr_seg_index',
-              self.scene_segmentation.curr_seg_index)
+        self.carla_world.set_pedestrians_cross_factor(0.1)
         logger.info('waitting until the vehicle reach the first segment')
         # wait until the vehicle reach first segment
         while (self.scene_segmentation.curr_seg_index < 0):
             if self.close_event.is_set():
                 return
             self.carla_world.wait_for_tick()
-            self.check_modules(dv)
-        
-        
-        # while (1):
-        #     if self.close_event.is_set():
-        #         return
-        #     self.carla_world.wait_for_tick()
-        #     self.check_modules(dv)
+        logger.info(
+            f'scene_segmentation.curr_seg_index={self.scene_segmentation.curr_seg_index}')
 
         while self.sim_status and not self.close_event.is_set():
             curr_index = self.scene_segmentation.curr_seg_index
@@ -292,13 +474,13 @@ class Simulator(object):
             if self.scene_segmentation.belongs_to_two_index == (False, False):
                 # just move ego forward until reaching next seg
                 self.carla_world.wait_for_tick()
-                self.check_modules(dv)
                 continue
 
             if curr_index == 0:
                 # if it's the first seg, curr need to be loaded
-                self.curr_local_scenario = LocalScenario(
-                    self.carla_world, self.ego_vehicle, logger)
+                self.curr_local_scenario = LocalScenario(self.carla_world,
+                                                         self.ego_vehicle,
+                                                         logger)
                 self.curr_local_scenario.id = str(curr_index)
                 if self.close_event.is_set():
                     return
@@ -307,9 +489,6 @@ class Simulator(object):
 
                 self.prev_local_scenario = None
             else:
-                # unload prev
-                # self.prev_local_scenario.scenario_end()   # has been unloaded
-                # move scenario forward
                 self.prev_local_scenario = self.curr_local_scenario
                 self.curr_local_scenario = self.next_local_scenario
 
@@ -328,100 +507,129 @@ class Simulator(object):
             if not self.curr_local_scenario.running:
                 self.curr_local_scenario.scenario_start()
 
+            log_id = f'{self.curr_local_scenario.evaluate_obj.id}'
+            self.start_record(id=log_id)
+
             while curr_index != self.scene_segmentation.finished_index:
+                world_ss = self.carla_world.wait_for_tick()
                 if not self.sim_status or self.close_event.is_set():
                     return
-                self.carla_world.wait_for_tick()
-                self.curr_local_scenario.npc_refresh()
-                world_ss = self.carla_world.get_snapshot()
-                self.curr_local_scenario.evaluate_snapshot_record(world_ss)
-                self.check_modules(dv)
+                if self.prev_local_scenario.running:
+                    self.prev_local_scenario.npc_refresh()
+                if self.curr_local_scenario.running:
+                    self.curr_local_scenario.npc_refresh()
+                if self.next_local_scenario.running:
+                    self.next_local_scenario.npc_refresh()
+                frame_record = self.curr_local_scenario.evaluate_snapshot_record(
+                    world_ss)
+                self.result_saver.frames_record.append(frame_record)
+                # self.check_modules()
                 if self.scene_segmentation.belongs_to_two_index == (True, True):
                     if not self.next_local_scenario.running:
                         self.next_local_scenario.scenario_start()
-            self.curr_local_scenario.scenario_end()
+            self.stop_record_and_save(save_video=False)
+            eva_result = self.curr_local_scenario.scenario_end()
+            if eva_result != None:
+                eva_result_t = Evaluate_Transfer(eva_result.res_id,
+                                                 eva_result.id,
+                                                 eva_result.walker_ind,
+                                                 eva_result.vehicle_ind,
+                                                 eva_result.is_evaluated,
+                                                 eva_result.is_in_queue)
+                req_dic = {
+                    'cmd': 'feedback',
+                    'eva_obj': eva_result_t
+                }
+                self.eva_req_queue.put(req_dic)
 
-        dv.disconnect()
         self.close()
         logger.info('[Simulator] === Simulation End === ')
 
-    def load_scenario(self, scenario_2_load: LocalScenario, seg_index):
+    def load_scenario(self,
+                      scenario_2_load: LocalScenario,
+                      seg_index,
+                      wait_timeout=5.0):
         seg_type = self.scene_segmentation.get_seg_type(
             self.scene_segmentation.segments[seg_index],
-            (cfg.scenario_width, cfg.scenario_length))
-        cega = self.ga_lib.get(seg_type)
-        if cega == None:
-            # Start a new GA and wait for a individual
-            cega = CEGA(cfg, logger=logger)
-            cega.type_str = seg_type
-            cega.prase_road_type(seg_type)
-            cega.start()
-            # store in lib
-            self.ga_lib[seg_type] = cega
-            timeout = 2
-            if len(cega.evaluate_list) == 0:
-                logger.info('Waitting for first individual')
-                while len(cega.evaluate_list) == 0:
-                    time.sleep(0.01)
-                    timeout -= 0.01
-                    if self.close_event.is_set():
-                        return
-                    if timeout <= 0:
-                        logger.error('Waitting Timeout')
-                        self.close()
-                        return
+            (self.cfgs.scenario_width, self.cfgs.scenario_length))
 
-            logger.info(f'CEGA {seg_type} individual gained')
-        obj_2_evaluate = cega.get_an_unevaluated_obj()
+        obj_2_evaluate = None
+        start_wait_time = time.time()
+        while time.time() - start_wait_time < wait_timeout:
+            if self.eva_res_queue.empty():
+                req_dic = {
+                    'cmd': 'get_obj',
+                    'type_str': seg_type
+                }
+                self.eva_req_queue.put(req_dic)
+            try:
+                eva_res_dict = self.eva_res_queue.get(timeout=wait_timeout)
+                if eva_res_dict['type_str'] == seg_type:
+                    obj_2_eva_t: Evaluate_Transfer = eva_res_dict['obj']
+                    obj_2_evaluate = None
+                    if obj_2_eva_t != None:
+                        obj_2_evaluate = Evaluate_Object(obj_2_eva_t.walker_ind,
+                                                         obj_2_eva_t.vehicle_ind,
+                                                         id=(obj_2_eva_t.walker_ind.id,
+                                                             obj_2_eva_t.vehicle_ind.id))
+                        obj_2_evaluate.res_id = obj_2_eva_t.uid
+                    break
+            except queue.Empty:
+                # get timeout
+                obj_2_evaluate = None
+                break
         if obj_2_evaluate == None:
             logger.info('No individual to evaluate, Vehicles roam freely')
             return False
 
-        # Now we can load this scenario
-        # scenario_2_load.id = str(seg_index)
         scenario_2_load.attach_segment(
             self.scene_segmentation.segments[seg_index])
         scenario_2_load.add_npcs_from_evaluate_obj(obj_2_evaluate)
         scenario_2_load.spawn_all_npcs()
         return True
 
-    def check_modules(self, dv: dreamview.Connection):
-        module_status = dv.get_module_status()
+    def check_modules(self):
+        module_status = self.dv.get_module_status()
         for module, status in module_status.items():
-            if (module not in self.modules or
-                    status):
+            if (module not in self.modules
+                    or status):
                 continue
             if module == "Prediction" or module == "Planning":
-                logger.warning('[Simulator] Module is closed: ' +
-                               module + '==> restrating')
+                logger.warning('[Simulator] Module is closed: '
+                               + module + '==> restrating')
                 self.pause_world()
-                dv.enable_apollo(self.destination, self.modules)
-                dv.set_destination_tranform(self.destination)
-                if self.restart_module(dv, module):
-                    logger.info('[Simulator] Module: ' +
-                                module + '==> restrated !')
+                self.dv.enable_apollo(self.destination, self.modules)
+                self.dv.set_destination_tranform(self.destination)
+                if self.restart_module(self.dv, module):
+                    logger.info('[Simulator] Module: '
+                                + module + '==> restrated !')
                     self.pause_world(False)
                     continue
                 else:
-                    logger.error('[Simulator] Module is closed: ' +
-                                 module + '==> restrat timeout')
+                    logger.error('[Simulator] Module is closed: '
+                                 + module + '==> restrat timeout')
                     self.sim_status = False
                     break
-            logger.warning('[Simulator] Module is closed: ' +
-                           module + ' ==> maybe not affect')
+            logger.warning('[Simulator] Module is closed: '
+                           + module + ' ==> maybe not affect')
 
-    def select_valid_dest(self, radius=100) -> carla.Transform:
+    def select_valid_dest(self, min_radius=100, max_radius=150) -> carla.Transform:
         '''
             Select a destination outside the specified radius from current position
         '''
         ego_curr_point = self.ego_vehicle.get_transform()
         valid_destination = False
+        sps = self.carla_map.get_spawn_points()
         while not valid_destination:
-            des_transform = random.choice(
-                self.carla_map.get_spawn_points())
+            des_transform = random.choice(sps)
+            des_wp = self.carla_map.get_waypoint(des_transform.location,
+                                                 project_to_road=False)
             distance = ego_curr_point.location.distance(des_transform.location)
-            if distance > radius:
-                valid_destination = True
+            if distance < min_radius or distance > max_radius:
+                continue
+            if des_wp.is_junction:
+                continue
+            valid_destination = True
         return des_transform
 
     def restart_module(self, dv_remote: dreamview.Connection,
@@ -448,13 +656,39 @@ class Simulator(object):
             self.carla_bridge.pause_event.clear()
 
     def close(self):
-        logger.warning("Shutting down.")
-        self.close_event.set()
+        logger.warning("Simulation Shutting down.")
+        timeout = 20
+        if self.closing:
+            logger.warning('Other thread closing simulation, waiting')
+        while self.closing and timeout > 0:
+            time.sleep(0.01)
+            timeout -= 0.01
+        if self.closed:
+            logger.warning("Force Killing")
+            os.kill(os.getpid(), signal.SIGKILL)
+            return
+        self.closing = True
+        logger.warning("Into Simulation Shutting down Program.")
 
-        if self.ga_lib != {}:
-            for seg_type, cega in self.ga_lib.items():
-                cega.stop()
-                logger.warning(f"[Shutdown] CEGA {seg_type} stoped")
+        def exit_program():
+            logger.warning("Force Exiting program due to timeout.")
+            os.kill(os.getpid(), signal.SIGKILL)
+        close_timeout_timer = SimulationTimeoutTimer(15, exit_program)
+        close_timeout_timer.start()
+
+        self.close_event.set()
+        self.sim_status = False
+
+        if self.is_recording:
+            self.stop_record_and_save()
+
+        if self.recorder:
+            self.recorder.rm_cams()
+            self.recorder = None
+
+        if self.unsafe_detector:
+            self.unsafe_detector.cleanup()
+            self.unsafe_detector = None
 
         if self.scene_segmentation:
             if self.scene_segmentation.routing_listener.running:
@@ -464,35 +698,52 @@ class Simulator(object):
             self.scene_segmentation.stop_vehicle_listening()
             logger.warning("[Shutdown] Vehicle listening stoped")
 
-        if self.curr_local_scenario:
+        print('[Shutdown] cls', self.curr_local_scenario)
+        if self.curr_local_scenario != None:
             self.curr_local_scenario.scenario_end()
             logger.warning("[Shutdown] Current scenario unloaded")
+            self.curr_local_scenario = None
+        print('[Shutdown] nls', self.next_local_scenario)
         if self.next_local_scenario:
             self.next_local_scenario.scenario_end()
             logger.warning("[Shutdown] Next scenario unloaded")
+            self.next_local_scenario = None
 
-        if self.cfgs.load_bridge:
-            if self.carla_client:
-                self.carla_world = self.carla_client.get_world()
-                settings = self.carla_world.get_settings()
-                settings.synchronous_mode = False
-                settings.fixed_delta_seconds = None
-                self.carla_world.apply_settings(settings)
-            if self.carla_bridge.shutdown:
-                self.carla_bridge.shutdown.set()
+        print('[Shutdown] dv', self.dv)
+        if self.dv:
+            self.dv.disconnect()
+            self.dv = None
+            logger.warning("[Shutdown] Disconnected from Dreamview")
+            
+        print('[Shutdown] cb', self.carla_bridge)
+        if self.carla_bridge != None:
+            logger.warning("[Shutdown] Shutting down bridge")
+            if self.carla_bridge.shutdown_event:
+                self.carla_bridge.shutdown_event.set()
             self.carla_bridge.destroy()
+            # if self.carla_bridge_thread:
+            #     # can be ignore, auto clear by os.kill(os.getpid(), signal.SIGKILL)
+            #     # self.carla_bridge_thread.
+            #     self.carla_bridge_thread.join()
+            self.carla_bridge = None
             logger.warning("[Shutdown] Brigde destroied")
 
-        if self.sim_status:
-            self.sim_status = False
+
+        print('[Shutdown] cw', self.carla_world)
         if self.carla_world:
             del self.carla_world
             self.carla_world = None
             logger.warning("[Shutdown] Carla world destroied")
+
         if self.carla_client:
             del self.carla_client
             self.carla_client = None
             logger.warning("[Shutdown] Carla client destroied")
+        close_timeout_timer.cancel()
+        self.closed = True
+        self.closing = False
+        logger.warning("All cleared, Force Killing")
+        os.kill(os.getpid(), signal.SIGKILL)
 
 
 if __name__ == "__main__":

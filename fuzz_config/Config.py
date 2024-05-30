@@ -27,7 +27,7 @@ class Config:
         # simulator config
         self.sim_host = '172.17.0.1'
         self.sim_port = 5000
-        self.load_world_timeout = 20
+        self.load_world_timeout = 10
         self.frame_rate = 10
 
         self.carla_map = "Town10hd"

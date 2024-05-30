@@ -7,6 +7,22 @@ import numpy as np
 from MS_fuzz.ga_engine.gene import GeneNpcWalkerList, GeneNpcVehicleList
 
 
+class Evaluate_Transfer:
+    def __init__(self, uid:str,
+                 id,
+                 walker_ind: GeneNpcWalkerList,
+                 vehicle_ind: GeneNpcVehicleList,
+                 is_evaluated,
+                 is_in_queue):
+        self.uid: str = uid # for transfer between processes
+        self.id = id
+        self.walker_ind: GeneNpcWalkerList = walker_ind
+        self.vehicle_ind: GeneNpcVehicleList = vehicle_ind
+        
+        self.is_evaluated = is_evaluated
+        self.is_in_queue = is_in_queue
+
+
 class Evaluate_Object:
     def __init__(self,
                  walker_ind: GeneNpcWalkerList,
@@ -20,6 +36,8 @@ class Evaluate_Object:
             self.id = id[0] + '_' + id[1]
 
         self.is_evaluated = False
+        self.is_in_queue = False
+        self.res_id = ''  # for transfer between processes
 
         self.f_crossing_time = 0
         self.f_distance = 0
@@ -56,6 +74,7 @@ class Evaluate_Object:
             self.walker_ind.fitness.values = (0, 0, 0, 0)
             self.vehicle_ind.fitness.values = (0, 0, 0, 0)
             self.is_evaluated = False
+            print(f'{self.id}, core = {(0, 0, 0, 0)}')
             return
         f_distance = self.frame_recorded[0]['min_dis']
         f_unsmooth_acc = self.frame_recorded[0]['unsmooth_acc']
@@ -92,6 +111,7 @@ class Evaluate_Object:
                                            self.f_smooth,
                                            self.f_diversity,
                                            self.f_interaction_rate)
+        print(f'{self.id}, core = {(self.f_distance, self.f_smooth, self.f_diversity, self.f_crossing_time)}')
         self.is_evaluated = True
 
     def predict_collision(self,

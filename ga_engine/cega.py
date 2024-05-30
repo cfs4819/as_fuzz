@@ -10,6 +10,10 @@ from MS_fuzz.ga_engine.gene import *
 import threading
 import queue
 import time
+import pickle
+import os
+import json
+import copy
 
 
 class CEGA:
@@ -26,8 +30,8 @@ class CEGA:
         self.scene_length = scenario_length
         self.scene_width = scenario_width
 
-        self.type_str = 'straight'  # straight, junctio
-        self.road_type = 'straight'
+        self.type_str = 'straight'
+        self.road_type = 'straight'  # straight, junction
         self.way_num = 2
         self.lane_num = 2
         self.junction_size = 'small'
@@ -43,7 +47,86 @@ class CEGA:
         self.main_thread: threading.Thread = None
         self.stop_event: threading.Event = None
 
+        self.pop_walkers = []
+        self.pop_vehicles = []
+        self.generation = 0
+
+        self.gen_history = {}
+
+        self.generation_file = None
+
+    def set_generation_file(self, file_path):
+        self.generation_file = file_path
+
+    def save_generation(self):
+        if self.generation_file == None or self.generation_file == '':
+            return
+
+        if not os.path.exists(self.generation_file):
+            os.makedirs(self.generation_file)
+
+        path = os.path.join(self.generation_file, f'cega_{self.type_str}.json')
+
+        result_dic = {}
+
+        result_dic['type'] = self.type_str
+        gen_his = {}
+        for gen_name, gen_dic in self.gen_history.items():
+            # geneartion
+            pop_w_dic = []
+            for ind_w in gen_dic['pop_w']:
+                ind_w_dic = {}
+                ind_fitness_value = ind_w.fitness.values
+                ind_w_dic['fitness'] = {
+                    'min_dis': ind_fitness_value[0],
+                    'smooth': ind_fitness_value[1],
+                    'diversity': ind_fitness_value[2],
+                    'crossing_time': ind_fitness_value[3]
+                }
+                ind_w_dic['walkers'] = [
+                    {
+                        'start_p': w.start,
+                        'start_t': w.start_time,
+                        'max_speed': w.max_speed,
+                        'status': w.status
+                    } for w in ind_w.list
+                ]
+
+                pop_w_dic.append(ind_w_dic)
+
+            pop_v_dic = []
+            for ind_v in gen_dic['pop_v']:
+                ind_v_dic = {}
+                ind_fitness_value = ind_v.fitness.values
+                ind_v_dic['fitness'] = {
+                    'min_dis': ind_fitness_value[0],
+                    'smooth': ind_fitness_value[1],
+                    'diversity': ind_fitness_value[2],
+                    'interaction_rate': ind_fitness_value[3]
+                }
+                ind_v_dic['vehicles'] = [
+                    {
+                        'start_p': v.start,
+                        'start_t': v.start_time,
+                        'end_p': v.end,
+                        'vehicle_type': v.vehicle_type,
+                        'status': v.status,
+                        'agnet_type': v.agent_type
+                    } for v in ind_v.list
+                ]
+                pop_v_dic.append(ind_v_dic)
+            this_gen_dic = {
+                # 'gen':gen_name,
+                'pop_v': pop_v_dic,
+                'pop_w': pop_w_dic
+            }
+            gen_his[gen_name] = this_gen_dic
+
+        with open(path, 'w') as f:
+            json.dump(result_dic, f)
+
     def prase_road_type(self, type_str: str):
+        self.type_str = type_str
         str_seg = type_str.split('_')
 
         if str_seg[0] == 'junction':
@@ -69,7 +152,7 @@ class CEGA:
             self.way_num = int(str_seg[1]) if str_seg[1] != '-1' else 2
             self.lane_num = int(str_seg[3]) if str_seg[3] != '-1' else 2
 
-            self.ind_vehicle_max_count = 1.5*self.lane_num
+            self.ind_vehicle_max_count = 1.5 * self.lane_num
 
     def evaluate(self, walker_ind: GeneNpcWalkerList, vehicle_ind: GeneNpcVehicleList):
         '''
@@ -163,8 +246,8 @@ class CEGA:
             return ind
 
         # add a random agent, p = 0.3
-        elif ((mut_pb <= 0.2 + 0.3 and len(ind.list) < ind.max_walker_count) or
-              len(ind.list) < 1):
+        elif ((mut_pb <= 0.2 + 0.3 and len(ind.list) < ind.max_walker_count)
+              or len(ind.list) < 1):
             ind.list.append(ind.get_a_new_agent(
                 self.scene_width, self.scene_length))
             return ind
@@ -172,10 +255,13 @@ class CEGA:
         # mutate a random agent, p = 0.5
         else:
             ind.list.remove(random.choice(ind.list))
-            start_x = random.uniform(-self.scene_length/2, self.scene_length/2)
-            start_y = random.uniform(-self.scene_width/2, self.scene_width/2)
-            end_x = random.uniform(-self.scene_length/2, self.scene_length/2*3)
-            end_y = random.uniform(-self.scene_width/2, self.scene_width/2)
+            start_x = random.uniform(-self.scene_length
+                                     / 2, self.scene_length / 2)
+            start_y = random.uniform(-self.scene_width
+                                     / 2, self.scene_width / 2)
+            end_x = random.uniform(-self.scene_length / 2,
+                                   self.scene_length / 2 * 3)
+            end_y = random.uniform(-self.scene_width / 2, self.scene_width / 2)
 
             new_walker = GeneNpcWalker()
             new_walker.start = {'x': start_x, 'y': start_y, 'z': 0}
@@ -201,8 +287,8 @@ class CEGA:
             return ind
 
         # add a random vehicle, p = 0.3
-        elif ((mut_pb <= 0.2 + 0.3 and len(ind.list) < ind.max_walker_count) or
-              len(ind.list) < 1):
+        elif ((mut_pb <= 0.2 + 0.3 and len(ind.list) < ind.max_walker_count)
+              or len(ind.list) < 1):
             ind.list.append(ind.get_a_new_agent(self.scene_width,
                                                 self.scene_length))
             return ind
@@ -221,18 +307,19 @@ class CEGA:
                                                  weights=mutete_weight,
                                                  k=3)
             if 'start' in parameters_2_mutate:
-                start_x = random.uniform(-self.scene_length/2,
-                                         self.scene_length/2)
-                start_y = random.uniform(-self.scene_width/2,
-                                         self.scene_width/2)
+                start_x = random.uniform(-self.scene_length / 2,
+                                         self.scene_length / 2)
+                start_y = random.uniform(-self.scene_width / 2,
+                                         self.scene_width / 2)
                 ind_2_mutate.start = {'x': start_x, 'y': start_y, 'z': 0}
             if 'end' in parameters_2_mutate:
-                end_x = random.uniform(-self.scene_length/2,
-                                       self.scene_length/2*3)
-                end_y = random.uniform(-self.scene_width/2, self.scene_width/2)
+                end_x = random.uniform(-self.scene_length / 2,
+                                       self.scene_length / 2 * 3)
+                end_y = random.uniform(-self.scene_width
+                                       / 2, self.scene_width / 2)
                 while abs(ind_2_mutate.start['y'] - end_y) <= 5:
-                    end_y = random.uniform(-self.scene_width/2,
-                                           self.scene_width/2)
+                    end_y = random.uniform(-self.scene_width / 2,
+                                           self.scene_width / 2)
                 ind_2_mutate.end = {'x': end_x, 'y': end_y, 'z': 0}
             if 'start_time' in parameters_2_mutate:
                 ind_2_mutate.start_time = random.uniform(0, 2)
@@ -260,8 +347,11 @@ class CEGA:
         self.running = True
 
     def stop(self):
+        if not self.running:
+            return
         self.stop_event.set()
         self.main_thread.join()
+        # self.save(f'CEGA_checkpoint_{self.type_str}.pkl')
         self.running = False
 
     def main_progress(self):
@@ -295,31 +385,33 @@ class CEGA:
         tb_vehicles.register('mutate', self.mutate_vehicles)
         tb_vehicles.register('select', tools.selNSGA2)
 
-        pop_walkers: List[GeneNpcWalkerList] = [
-            get_new_walker_ind(max_count=self.ind_walker_max_count) for _ in range(POP_SIZE)]
-        pop_vehicles: List[GeneNpcVehicleList] = [
-            get_new_vehicle_ind(max_count=self.ind_vehicle_max_count) for _ in range(POP_SIZE)]
+        if self.generation == 0:
+            self.pop_walkers: List[GeneNpcWalkerList] = [
+                get_new_walker_ind(max_count=self.ind_walker_max_count) for _ in range(POP_SIZE)]
+            self.pop_vehicles: List[GeneNpcVehicleList] = [
+                get_new_vehicle_ind(max_count=self.ind_vehicle_max_count) for _ in range(POP_SIZE)]
 
-        for index, c in enumerate(pop_walkers):
-            c.id = f'gen_0_ind_{index}'
-            # print(f'{c.id}, {c.max_walker_count}, {len(c.list)}')
-        for index, c in enumerate(pop_vehicles):
-            c.id = f'gen_0_ind_{index}'
-            # print(f'{c.id}, {c.max_vehicle_count}, {len(c.list)}')
+        for index, c in enumerate(self.pop_walkers):
+            c.id = f'gen_{self.generation}_ind_{index}'
+        for index, c in enumerate(self.pop_vehicles):
+            c.id = f'gen_{self.generation}_ind_{index}'
 
         hof_walkers = tools.ParetoFront()
         hof_vehicles = tools.ParetoFront()
 
         # Evaluate Initial Population
-        if self.logger:
-            self.logger.info(f' ====== Analyzing Initial Population ====== ')
+        if self.generation == 0:
+            if self.logger:
+                self.logger.info(
+                    f' ====== Analyzing Initial Population ====== ')
 
-        self.evaluate_pop(pop_walkers, pop_vehicles)
+            self.evaluate_pop(self.pop_walkers, self.pop_vehicles)
 
-        hof_walkers.update(pop_walkers)
-        hof_vehicles.update(pop_vehicles)
+            hof_walkers.update(self.pop_walkers)
+            hof_vehicles.update(self.pop_vehicles)
 
-        for gen in range(1, self.max_generation):
+        for gen in range(self.generation, self.max_generation):
+            self.generation = gen
             if self.stop_event.is_set():
                 return
             if self.logger:
@@ -327,30 +419,40 @@ class CEGA:
 
             # Vary the population
             offspring_walkers: List[GeneNpcWalkerList] = algorithms.varOr(
-                pop_walkers, tb_walkers, OFF_SIZE, CXPB, MUTPB)
+                self.pop_walkers, tb_walkers, OFF_SIZE, CXPB, MUTPB)
             offspring_vehicles: List[GeneNpcVehicleList] = algorithms.varOr(
-                pop_vehicles, tb_vehicles, OFF_SIZE, CXPB, MUTPB)
+                self.pop_vehicles, tb_vehicles, OFF_SIZE, CXPB, MUTPB)
 
             for index, c in enumerate(offspring_walkers):
                 c.id = f'gen_{gen}_ind_{index}'
             for index, c in enumerate(offspring_vehicles):
                 c.id = f'gen_{gen}_ind_{index}'
 
-            # Evaluate the individuals with an invalid fitness
             self.evaluate_pop(offspring_walkers, offspring_vehicles)
 
             hof_walkers.update(offspring_walkers)
             hof_vehicles.update(offspring_vehicles)
 
+            # save generation
+            last_gen_w = copy.deepcopy(self.pop_walkers)
+            last_gen_v = copy.deepcopy(self.pop_vehicles)
+            self.gen_history[f'gen_{gen}'] = {
+                'pop_w': last_gen_w,
+                'pop_v': last_gen_v
+            }
+
+            if self.generation_file:
+                self.save_generation()
+
             # population update
-            pop_walkers[:] = tb_walkers.select(
-                pop_walkers + offspring_walkers, POP_SIZE)
-            pop_vehicles[:] = tb_vehicles.select(
-                pop_vehicles + offspring_vehicles, POP_SIZE)
+            self.pop_walkers[:] = tb_walkers.select(self.pop_walkers + offspring_walkers,
+                                                    POP_SIZE)
+            self.pop_vehicles[:] = tb_vehicles.select(self.pop_vehicles + offspring_vehicles,
+                                                      POP_SIZE)
 
     def evaluate_pop(self, pop_walkers: List[GeneNpcWalkerList],
                      pop_vehicles: List[GeneNpcVehicleList]):
-        
+
         pop_size = len(pop_walkers) if len(pop_walkers) < len(
             pop_vehicles) else len(pop_vehicles)
 
@@ -367,8 +469,8 @@ class CEGA:
                 # save if needed
                 return
 
-            evaluate_obj = Evaluate_Object(walker_ind, 
-                                           vehicle_ind, 
+            evaluate_obj = Evaluate_Object(walker_ind,
+                                           vehicle_ind,
                                            id=(walker_ind.id, vehicle_ind.id))
             self.evaluate_list.append(evaluate_obj)
 
@@ -394,9 +496,60 @@ class CEGA:
                 return None
             time.sleep(0.01)
         for obj in self.evaluate_list:
-            if not obj.is_evaluated:
+            if not obj.is_evaluated and not obj.is_in_queue:
+                obj.is_in_queue = True
                 return obj
         return None
 
-    def save(self):
-        pass
+    def save(self, filename):
+        print(f'cega {self.type_str} saving at {filename}')
+        with open(filename, 'wb') as f:
+            state = {
+                'max_generation': self.max_generation,
+                'num_individuals': self.num_individuals,
+                'scene_length': self.scene_length,
+                'scene_width': self.scene_width,
+                'type_str': self.type_str,
+                'road_type': self.road_type,
+                'way_num': self.way_num,
+                'lane_num': self.lane_num,
+                'junction_size': self.junction_size,
+                'junction_dir_num': self.junction_dir_num,
+                'ind_vehicle_max_count': self.ind_vehicle_max_count,
+                'ind_walker_max_count': self.ind_walker_max_count,
+                'evaluate_list': self.evaluate_list,
+                'pop_walkers': self.pop_walkers,
+                'pop_vehicles': self.pop_vehicles,
+                'generation': self.generation,
+                'gen_history': self.gen_history
+            }
+            pickle.dump(state, f)
+
+    def load_from_file(self, filename):
+        try:
+            with open(filename, 'rb') as f:
+                state = pickle.load(f)
+                self.max_generation = state['max_generation']
+                self.num_individuals = state['num_individuals']
+                self.scene_length = state['scene_length']
+                self.scene_width = state['scene_width']
+                self.type_str = state['type_str']
+                self.road_type = state['road_type']
+                self.way_num = state['way_num']
+                self.lane_num = state['lane_num']
+                self.junction_size = state['junction_size']
+                self.junction_dir_num = state['junction_dir_num']
+                self.ind_vehicle_max_count = state['ind_vehicle_max_count']
+                self.ind_walker_max_count = state['ind_walker_max_count']
+                self.evaluate_list = state['evaluate_list']
+                self.pop_walkers = state['pop_walkers']
+                self.pop_vehicles = state['pop_vehicles']
+                self.generation = state['generation']
+                self.gen_history = state['gen_history']
+
+            if self.logger:
+                self.logger.info('Loaded checkpoint successfully.')
+        except Exception as e:
+            if self.logger:
+                self.logger.info(
+                    'No checkpoint found or failed to load checkpoint.')
