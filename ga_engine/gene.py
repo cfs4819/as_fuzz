@@ -106,7 +106,7 @@ class GeneNpcVehicleList:
         new_vehicle.start = {'x': start_x, 'y': start_y, 'z': 0}
         new_vehicle.end = {'x': end_x, 'y': end_y, 'z': 0}
 
-        new_vehicle.start_time = random.uniform(0, 2)
+        new_vehicle.start_time = random.uniform(0, 1)
 
         new_vehicle.vehicle_type = random.choices([0, 1, 2, 3],
                                                   weights=[0.4, 0.3, 0.2, 0.1], k=1)[0]
@@ -125,7 +125,10 @@ class GeneNpcVehicleList:
 def get_new_walker_ind(max_count:int=5) -> GeneNpcWalkerList:
     ind = GeneNpcWalkerList(max_count=max_count)
     ind.list = []
-    for i in range(random.randint(1, max_count)):
+    if max_count <= 1:
+        ind.list.append(ind.get_a_new_agent())
+        return ind
+    for i in range(random.randint(1, int(max_count))):
         ind.list.append(ind.get_a_new_agent())
     return ind
 
@@ -133,7 +136,10 @@ def get_new_walker_ind(max_count:int=5) -> GeneNpcWalkerList:
 def get_new_vehicle_ind(max_count:int=5) -> GeneNpcVehicleList:
     ind = GeneNpcVehicleList(max_count=max_count)
     ind.list = []
-    for i in range(random.randint(1, max_count)):
+    if max_count <= 1:
+        ind.list.append(ind.get_a_new_agent())
+        return ind
+    for i in range(random.randint(1, int(max_count))):
         ind.list.append(ind.get_a_new_agent())
     return ind
 
