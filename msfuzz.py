@@ -13,7 +13,7 @@ from carla_bridge.apollo_carla_bridge import CarlaCyberBridge
 from loguru import logger
 
 from MS_fuzz.fuzz_config.Config import Config
-from MS_fuzz.common.simulator_v2 import Simulator
+from MS_fuzz.common.simulator import Simulator
 from MS_fuzz.ga_engine.ga_lib import GA_LIB
 
 

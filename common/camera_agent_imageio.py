@@ -191,11 +191,13 @@ class ScenarioRecorder:
             self.fpp_cam.stop()
         if self.back_cam.is_listening:
             self.back_cam.stop()
-        self.top_cam.destroy()
-        self.tpp_cam.destroy()
-        self.fpp_cam.destroy()
-        self.back_cam.destroy()
-
+        try:
+            self.top_cam.destroy()
+            self.tpp_cam.destroy()
+            self.fpp_cam.destroy()
+            self.back_cam.destroy()
+        except RuntimeError:
+            print("Camera already destroyed")
 
 if __name__ == '__main__':
     client = carla.Client("172.17.0.1", 5000)

@@ -205,9 +205,8 @@ class UnsafeDetector(object):
 
             time.sleep(0.05)
 
-        with self.timers_lock:
-            uid = f"{road_id}_{section_id}"
-            del self.active_timers[uid]
+        uid = f"{road_id}_{section_id}"
+        del self.active_timers[uid]
 
     def trigger_callbacks(self, type, message, data=None):
         # Call registered callback functions
@@ -220,7 +219,8 @@ class UnsafeDetector(object):
             with self.timers_lock:
                 for uid, (thread, stop_event) in self.active_timers.items():
                     stop_event.set()  # Signal the event to stop the thread
-                    thread.join()  # Wait for the thread to finish
+                    if thread.is_alive():
+                        thread.join() #  Wait for the thread to finish
                 self.active_timers.clear()
 
             if self.lane_change_detector:
