@@ -29,7 +29,7 @@ while [ $(date +%s) -lt $end_time ]; do
   else
     start_time=$(date '+%Y-%m-%d %H:%M:%S')
     echo "[$start_time] Carla container not found, starting with script" >> $log_file
-    docker exec -it -u bl_8889 -e HISTFILE=/apollo/.dev_bash_hist apollo_dev_bl_8889 /bin/bash -i -c 'cd /apollo/modules/MS_fuzz/base_line && python random_scene.py'
+    $start_carla_script
     sleep 10
   fi
 
