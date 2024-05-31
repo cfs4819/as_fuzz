@@ -6,6 +6,7 @@ import argparse
 import signal
 import time
 import pdb
+import sys
 
 import carla
 
@@ -83,6 +84,9 @@ class MS_FUZZ(object):
                     self.sim_process.join()
                     self.sim = None
                     break
+                if not self.ga_process.is_alive():
+                    self.close()
+                    sys.exit()
 
                 time.sleep(1)
 

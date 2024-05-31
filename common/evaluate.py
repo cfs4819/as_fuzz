@@ -3,6 +3,7 @@ import carla
 from typing import List, Dict
 import math
 import numpy as np
+from loguru import logger
 
 from MS_fuzz.ga_engine.gene import GeneNpcWalkerList, GeneNpcVehicleList
 
@@ -74,7 +75,7 @@ class Evaluate_Object:
             self.walker_ind.fitness.values = (0, 0, 0, 0)
             self.vehicle_ind.fitness.values = (0, 0, 0, 0)
             self.is_evaluated = False
-            print(f'{self.id}, core = {(0, 0, 0, 0)}')
+            logger.info(f'{self.id}, core = {(0, 0, 0, 0)}')
             return
         f_distance = self.frame_recorded[0]['min_dis']
         f_unsmooth_acc = self.frame_recorded[0]['unsmooth_acc']
@@ -83,6 +84,8 @@ class Evaluate_Object:
         vehicle_may_collide = 0
 
         for frame in self.frame_recorded:
+            if frame == None:
+                continue
             if frame['min_dis'] < f_distance:
                 f_distance = frame['min_dis']
 
@@ -111,7 +114,7 @@ class Evaluate_Object:
                                            self.f_smooth,
                                            self.f_diversity,
                                            self.f_interaction_rate)
-        print(f'{self.id}, core = {(self.f_distance, self.f_smooth, self.f_diversity, self.f_crossing_time)}')
+        logger.info(f'{self.id}, core = {(self.f_distance, self.f_smooth, self.f_diversity, self.f_crossing_time)}')
         self.is_evaluated = True
 
     def predict_collision(self,
