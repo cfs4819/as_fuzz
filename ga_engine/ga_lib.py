@@ -219,5 +219,8 @@ class GA_LIB():
                     target_eva_obj.is_in_queue = False
             except queue.Empty:
                 continue
-            except:
+            except KeyboardInterrupt:
                 break
+            except Exception as e:
+                print('[Ga_lib]',e)
+                continue

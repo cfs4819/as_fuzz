@@ -473,7 +473,7 @@ class LocalScenario(object):
 
         self.running = True
 
-    def scenario_end(self):
+    def scenario_end(self)->Evaluate_Object:
         self.remove_all_npcs()
         if self.evaluate_obj:
             self.evaluate_obj.evaluate()
@@ -655,6 +655,8 @@ class LocalScenario(object):
         for npc in npc_vehicles_ss + npc_walkers_ss:
             if ego_ss == None:
                 return None
+            if npc == None:
+                continue
             dis = ego_ss.get_transform().location.distance(npc.get_transform().location)
             if dis < min_dis:
                 min_dis = dis

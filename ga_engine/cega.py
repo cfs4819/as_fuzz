@@ -14,6 +14,7 @@ import pickle
 import os
 import json
 import copy
+import datetime
 
 
 class CEGA:
@@ -65,7 +66,9 @@ class CEGA:
         if not os.path.exists(self.generation_file):
             os.makedirs(self.generation_file)
 
-        path = os.path.join(self.generation_file, f'cega_{self.type_str}.json')
+        datetime = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = os.path.join(self.generation_file,
+                            f'cega_{self.type_str}_his_{datetime}.json')
 
         result_dic = {}
 
@@ -121,9 +124,9 @@ class CEGA:
                 'pop_w': pop_w_dic
             }
             gen_his[gen_name] = this_gen_dic
-
+        result_dic['gen_his'] = gen_his
         with open(path, 'w') as f:
-            json.dump(result_dic, f)
+            json.dump(result_dic, f, indent=4)
 
     def prase_road_type(self, type_str: str):
         self.type_str = type_str
@@ -154,103 +157,129 @@ class CEGA:
 
             self.ind_vehicle_max_count = 1.5 * self.lane_num
 
-    def evaluate(self, walker_ind: GeneNpcWalkerList, vehicle_ind: GeneNpcVehicleList):
-        '''
-            1. Target:
-                wait for evaluate result
-                then return <walker_fitness, vehicle_fitness>
-            2. for all individuals:
-                f_distance: the minimum distance between ego and other npcs during the simulation time t
-                f_smooth : represents the ego vehicle's acceleration during a scene
-                f_diversity: diversity of the scene
-            3. for npc_walkers:
-                f_crossing_time : Time taken to cross the road
-            4. for npc_vehicles:s
-                f_interaction_rate: the rate at which vehicles interact with the ego vehicle
-        '''
-        evaluate_obj = Evaluate_Object(walker_ind, vehicle_ind)
+    # def evaluate(self, walker_ind: GeneNpcWalkerList, vehicle_ind: GeneNpcVehicleList):
+    #     '''
+    #         1. Target:
+    #             wait for evaluate result
+    #             then return <walker_fitness, vehicle_fitness>
+    #         2. for all individuals:
+    #             f_distance: the minimum distance between ego and other npcs during the simulation time t
+    #             f_smooth : represents the ego vehicle's acceleration during a scene
+    #             f_diversity: diversity of the scene
+    #         3. for npc_walkers:
+    #             f_crossing_time : Time taken to cross the road
+    #         4. for npc_vehicles:s
+    #             f_interaction_rate: the rate at which vehicles interact with the ego vehicle
+    #     '''
+    #     evaluate_obj = Evaluate_Object(walker_ind, vehicle_ind)
 
-        self.evaluate_list.append(evaluate_obj)
+    #     self.evaluate_list.append(evaluate_obj)
 
-        while not self.stop_event.is_set():
-            # wait for result
-            if evaluate_obj.is_evaluated:
-                return evaluate_obj.fitness
-        return -1, -1, -1, -1, -1
+    #     while not self.stop_event.is_set():
+    #         # wait for result
+    #         if evaluate_obj.is_evaluated:
+    #             return evaluate_obj.fitness
+    #     return -1, -1, -1, -1, -1
 
     def mate_walkers(self, ind1: GeneNpcWalkerList, ind2: GeneNpcWalkerList):
-        offspring = GeneNpcWalkerList(max_count=self.ind_walker_max_count)
+        offspring1 = GeneNpcWalkerList(max_count=self.ind_walker_max_count)
+        offspring2 = GeneNpcWalkerList(max_count=self.ind_walker_max_count)
 
         for index in range(min(len(ind1.list), len(ind2.list))):
             parent1 = ind1.list[index]
             parent2 = ind2.list[index]
 
-            walker = GeneNpcWalker()
-            walker.start = random.choice([parent1.start, parent2.start])
-            walker.end = random.choice([parent1.end, parent2.end])
-            walker.start_time = random.choice(
+            walker1 = GeneNpcWalker()
+            walker2 = GeneNpcWalker()
+
+            walker1.start = random.choice([parent1.start, parent2.start])
+            walker2.start = random.choice([parent1.start, parent2.start])
+            walker1.end = random.choice([parent1.end, parent2.end])
+            walker2.end = random.choice([parent1.end, parent2.end])
+            walker1.start_time = random.choice(
                 [parent1.start_time, parent2.start_time])
-            walker.status = random.choice([parent1.status, parent2.status])
-            walker.max_speed = random.choice(
+            walker2.start_time = random.choice(
+                [parent1.start_time, parent2.start_time])
+            walker1.status = random.choice([parent1.status, parent2.status])
+            walker2.status = random.choice([parent1.status, parent2.status])
+            walker1.max_speed = random.choice(
+                [parent1.max_speed, parent2.max_speed])
+            walker2.max_speed = random.choice(
                 [parent1.max_speed, parent2.max_speed])
 
-            offspring.list.append(walker)
+            offspring1.list.append(walker1)
+            offspring2.list.append(walker2)
 
-        for index in range(min(len(ind1.list), len(ind2.list)),
-                           max(len(ind1.list), len(ind2.list))):
+        for index in range(min(len(ind1.list), len(ind2.list)), max(len(ind1.list), len(ind2.list))):
             if len(ind1.list) > len(ind2.list):
-                offspring.list.append(deepcopy(ind1.list[index]))
+                offspring1.list.append(deepcopy(ind1.list[index]))
+                offspring2.list.append(deepcopy(ind1.list[index]))
             else:
-                offspring.list.append(deepcopy(ind2.list[index]))
+                offspring1.list.append(deepcopy(ind2.list[index]))
+                offspring2.list.append(deepcopy(ind2.list[index]))
 
-        return offspring
+        return offspring1, offspring2
 
     def mate_vehicles(self, ind1: GeneNpcVehicleList, ind2: GeneNpcVehicleList):
-        offspring = GeneNpcVehicleList(max_count=self.ind_vehicle_max_count)
+        offspring1 = GeneNpcVehicleList(max_count=self.ind_vehicle_max_count)
+        offspring2 = GeneNpcVehicleList(max_count=self.ind_vehicle_max_count)
 
         for index in range(min(len(ind1.list), len(ind2.list))):
             parent1 = ind1.list[index]
             parent2 = ind2.list[index]
 
-            vehicle = GeneNpcVehicle()
+            vehicle1 = GeneNpcVehicle()
+            vehicle2 = GeneNpcVehicle()
 
-            vehicle.start = random.choice([parent1.start, parent2.start])
-            vehicle.end = random.choice([parent1.end, parent2.end])
-            vehicle.start_time = random.choice(
+            vehicle1.start = random.choice([parent1.start, parent2.start])
+            vehicle2.start = random.choice([parent1.start, parent2.start])
+            vehicle1.end = random.choice([parent1.end, parent2.end])
+            vehicle2.end = random.choice([parent1.end, parent2.end])
+            vehicle1.start_time = random.choice(
                 [parent1.start_time, parent2.start_time])
-            vehicle.agent_type = random.choice(
+            vehicle2.start_time = random.choice(
+                [parent1.start_time, parent2.start_time])
+            vehicle1.agent_type = random.choice(
                 [parent1.agent_type, parent2.agent_type])
-            vehicle.status = random.choice([parent1.status, parent2.status])
+            vehicle2.agent_type = random.choice(
+                [parent1.agent_type, parent2.agent_type])
+            vehicle1.status = random.choice([parent1.status, parent2.status])
+            vehicle2.status = random.choice([parent1.status, parent2.status])
 
-            if vehicle.status == 0:
-                vehicle.initial_speed = random.choice(
+            if vehicle1.status == 0:
+                vehicle1.initial_speed = random.choice(
+                    [parent1.initial_speed, parent2.initial_speed])
+            if vehicle2.status == 0:
+                vehicle2.initial_speed = random.choice(
                     [parent1.initial_speed, parent2.initial_speed])
 
-            offspring.list.append(vehicle)
+            offspring1.list.append(vehicle1)
+            offspring2.list.append(vehicle2)
 
-        for index in range(min(len(ind1.list), len(ind2.list)),
-                           max(len(ind1.list), len(ind2.list))):
+        for index in range(min(len(ind1.list), len(ind2.list)), max(len(ind1.list), len(ind2.list))):
             if len(ind1.list) > len(ind2.list):
-                offspring.list.append(deepcopy(ind1.list[index]))
+                offspring1.list.append(deepcopy(ind1.list[index]))
+                offspring2.list.append(deepcopy(ind1.list[index]))
             else:
-                offspring.list.append(deepcopy(ind2.list[index]))
+                offspring1.list.append(deepcopy(ind2.list[index]))
+                offspring2.list.append(deepcopy(ind2.list[index]))
 
-        return offspring
+        return offspring1, offspring2
 
     def mutate_walkers(self, ind: GeneNpcWalkerList):
-        mut_pb = random()
+        mut_pb = random.random()
 
         # remove a random agent, p = 0.2
         if mut_pb <= 0.2 and len(ind.list) > 1:
             ind.list.remove(random.choice(ind.list))
-            return ind
+            return (ind,)
 
         # add a random agent, p = 0.3
         elif ((mut_pb <= 0.2 + 0.3 and len(ind.list) < ind.max_walker_count)
               or len(ind.list) < 1):
             ind.list.append(ind.get_a_new_agent(
                 self.scene_width, self.scene_length))
-            return ind
+            return (ind,)
 
         # mutate a random agent, p = 0.5
         else:
@@ -276,22 +305,22 @@ class CEGA:
                 new_walker.max_speed = random.uniform(0, 3)
 
             ind.list.append(new_walker)
-            return ind
+            return (ind,)
 
     def mutate_vehicles(self, ind: GeneNpcVehicleList):
-        mut_pb = random()
+        mut_pb = random.random()
 
         # remove a random agent, p = 0.2
         if mut_pb <= 0.2 and len(ind.list) > 1:
             ind.list.remove(random.choice(ind.list))
-            return ind
+            return (ind,)
 
         # add a random vehicle, p = 0.3
-        elif ((mut_pb <= 0.2 + 0.3 and len(ind.list) < ind.max_walker_count)
+        elif ((mut_pb <= 0.2 + 0.3 and len(ind.list) < ind.max_vehicle_count)
               or len(ind.list) < 1):
             ind.list.append(ind.get_a_new_agent(self.scene_width,
                                                 self.scene_length))
-            return ind
+            return (ind,)
 
         # mutate a random agent, p = 0.5
         else:
@@ -299,12 +328,12 @@ class CEGA:
             parameters_2_mutate_list = ['start', 'end', 'start_time',
                                         'vehicle_type', 'initial_speed',
                                         'status', 'agent_type']
-            mutete_weight = [0.2, 0.2, 0.1,
+            mutate_weight = [0.2, 0.2, 0.1,
                              0.2, 0.1,
                              0.0, 0.2]
             # select 3 parameters to mutate
             parameters_2_mutate = random.choices(parameters_2_mutate_list,
-                                                 weights=mutete_weight,
+                                                 weights=mutate_weight,
                                                  k=3)
             if 'start' in parameters_2_mutate:
                 start_x = random.uniform(-self.scene_length / 2,
@@ -337,7 +366,7 @@ class CEGA:
                 ind_2_mutate.agent_type = random.choices([0, 1, 2],
                                                          weights=[0.6, 0.2, 0.2], k=1)[0]
 
-            return ind
+            return (ind,)
 
     def start(self):
         self.main_thread = threading.Thread(target=self.main_progress)
@@ -442,6 +471,8 @@ class CEGA:
             }
 
             if self.generation_file:
+                self.logger.info(
+                    f'Saving generation {gen} to {self.generation_file}')
                 self.save_generation()
 
             # population update
@@ -453,8 +484,7 @@ class CEGA:
     def evaluate_pop(self, pop_walkers: List[GeneNpcWalkerList],
                      pop_vehicles: List[GeneNpcVehicleList]):
 
-        pop_size = len(pop_walkers) if len(pop_walkers) < len(
-            pop_vehicles) else len(pop_vehicles)
+        pop_size = min(len(pop_walkers), len(pop_vehicles))
 
         for index in range(pop_size):
             walker_ind = pop_walkers[index]
@@ -495,9 +525,14 @@ class CEGA:
             if self.stop_event.is_set():
                 return None
             time.sleep(0.01)
+
         for obj in self.evaluate_list:
             if not obj.is_evaluated and not obj.is_in_queue:
                 obj.is_in_queue = True
+                return obj
+        # if all objects are in queue, check again
+        for obj in self.evaluate_list:
+            if not obj.is_evaluated and obj.is_in_queue:
                 return obj
         return None
 

@@ -322,6 +322,19 @@ class Simulator(object):
 
         self.unsafe_detector.start_detection()
 
+    def feedback_eva(self, eva_result: Evaluate_Object):
+        eva_result_t = Evaluate_Transfer(eva_result.res_id,
+                                         eva_result.id,
+                                         eva_result.walker_ind,
+                                         eva_result.vehicle_ind,
+                                         eva_result.is_evaluated,
+                                         eva_result.is_in_queue)
+        req_dic = {
+            'cmd': 'feedback',
+            'eva_obj': eva_result_t
+        }
+        self.eva_req_queue.put(req_dic)
+
     def on_unsafe(self, type, message, data=None):
         if self.on_unsafe_lock:
             return
@@ -343,6 +356,11 @@ class Simulator(object):
                 self.result_saver.result_to_save['unsafe_type'] = UNSAFE_TYPE.type_str[type]
                 logger.info('reload')
                 self.stop_record_and_save(save_video=True)
+                if self.curr_local_scenario is not None:
+                    if self.curr_local_scenario.running:
+                        eva_result = self.curr_local_scenario.scenario_end()
+                        if eva_result != None:
+                            self.feedback_eva(eva_result)
                 self.close()
                 logger.info('closed')
         elif type in [UNSAFE_TYPE.LANE_CHANGE,
@@ -373,6 +391,11 @@ class Simulator(object):
             self.result_saver.result_to_save['unsafe_type'] = UNSAFE_TYPE.type_str[type]
             logger.info('reload')
             self.stop_record_and_save(save_video=True)
+            if self.curr_local_scenario is not None:
+                if self.curr_local_scenario.running:
+                    eva_result = self.curr_local_scenario.scenario_end()
+                    if eva_result != None:
+                        self.feedback_eva(eva_result)
             self.close()
         self.on_unsafe_lock = False
         return
@@ -457,7 +480,19 @@ class Simulator(object):
         else:
             return False
 
+    def ego_pos_listener_handler(self, close_event: threading.Event):
+        while not close_event.isSet():
+            if self.check_if_ego_close_dest():
+                self.on_reach_destination()
+        pass
+
+    def on_reach_destination(self):
+        pass
+
     def main_loop(self):
+        self.handle_segs()
+
+    def handle_segs(self):
         self.carla_world.set_pedestrians_cross_factor(0.1)
         logger.info('waitting until the vehicle reach the first segment')
         # wait until the vehicle reach first segment
@@ -493,7 +528,7 @@ class Simulator(object):
                 self.curr_local_scenario = self.next_local_scenario
 
             if curr_index != (len(self.scene_segmentation.segments) - 1):
-                # load next
+                # if not the final seg load next
                 self.next_local_scenario = LocalScenario(
                     self.carla_world, self.ego_vehicle, logger)
                 self.next_local_scenario.id = str(curr_index + 1)
@@ -503,44 +538,72 @@ class Simulator(object):
                 self.load_scenario(self.next_local_scenario,
                                    curr_index + 1)
 
-            # run curr
-            if not self.curr_local_scenario.running:
-                self.curr_local_scenario.scenario_start()
+                # run curr
+                if self.curr_local_scenario != None:
+                    if not self.curr_local_scenario.running:
+                        self.curr_local_scenario.scenario_start()
 
-            log_id = f'{self.curr_local_scenario.evaluate_obj.id}'
-            self.start_record(id=log_id)
+                if self.curr_local_scenario != None and \
+                        self.curr_local_scenario.evaluate_obj != None:
+                    log_id = f'{curr_index}_{self.curr_local_scenario.evaluate_obj.id}'
+                else:
+                    log_id = f'{curr_index}'
+                self.start_record(id=log_id)
 
-            while curr_index != self.scene_segmentation.finished_index:
-                world_ss = self.carla_world.wait_for_tick()
-                if not self.sim_status or self.close_event.is_set():
+                while curr_index != self.scene_segmentation.finished_index:
+                    world_ss = self.carla_world.wait_for_tick()
+                    if not self.sim_status or self.close_event.is_set():
+                        return
+                    if self.prev_local_scenario != None:
+                        if self.prev_local_scenario.running:
+                            self.prev_local_scenario.npc_refresh()
+                    if self.curr_local_scenario != None:
+                        if self.curr_local_scenario.running:
+                            self.curr_local_scenario.npc_refresh()
+                    if self.next_local_scenario != None:
+                        if self.next_local_scenario.running:
+                            self.next_local_scenario.npc_refresh()
+                    frame_record = self.curr_local_scenario.evaluate_snapshot_record(
+                        world_ss)
+                    self.result_saver.frames_record.append(frame_record)
+                    # self.check_modules()
+                    if self.scene_segmentation.belongs_to_two_index == (True, True):
+                        if not self.next_local_scenario.running:
+                            self.next_local_scenario.scenario_start()
+                self.stop_record_and_save(save_video=False)
+                eva_result = self.curr_local_scenario.scenario_end()
+                if eva_result != None:
+                    self.feedback_eva(eva_result)
+            else:
+                # aleady the final seg
+                if self.close_event.is_set():
                     return
-                if self.prev_local_scenario.running:
-                    self.prev_local_scenario.npc_refresh()
-                if self.curr_local_scenario.running:
-                    self.curr_local_scenario.npc_refresh()
-                if self.next_local_scenario.running:
-                    self.next_local_scenario.npc_refresh()
-                frame_record = self.curr_local_scenario.evaluate_snapshot_record(
-                    world_ss)
-                self.result_saver.frames_record.append(frame_record)
-                # self.check_modules()
-                if self.scene_segmentation.belongs_to_two_index == (True, True):
-                    if not self.next_local_scenario.running:
-                        self.next_local_scenario.scenario_start()
-            self.stop_record_and_save(save_video=False)
-            eva_result = self.curr_local_scenario.scenario_end()
-            if eva_result != None:
-                eva_result_t = Evaluate_Transfer(eva_result.res_id,
-                                                 eva_result.id,
-                                                 eva_result.walker_ind,
-                                                 eva_result.vehicle_ind,
-                                                 eva_result.is_evaluated,
-                                                 eva_result.is_in_queue)
-                req_dic = {
-                    'cmd': 'feedback',
-                    'eva_obj': eva_result_t
-                }
-                self.eva_req_queue.put(req_dic)
+                if not self.curr_local_scenario.running:
+                    self.curr_local_scenario.scenario_start()
+                log_id = f'{self.curr_local_scenario.evaluate_obj.id}'
+                self.start_record(id=log_id)
+                while self.sim_status and not self.close_event.isSet():
+                    world_ss = self.carla_world.wait_for_tick()
+                    if not self.sim_status or self.close_event.isSet():
+                        break
+                    if self.check_if_ego_close_dest(10):
+                        if self.ego_vehicle.get_control().brake > 0.5:
+                            print('\r')
+                            print('reach des')
+                            self.stop_record_and_save(save_video=False)
+                            eva_result = self.curr_local_scenario.scenario_end()
+                            if eva_result != None:
+                                self.feedback_eva(eva_result)
+                            self.close()
+                    if self.prev_local_scenario != None:
+                        if self.prev_local_scenario.running:
+                            self.prev_local_scenario.npc_refresh()
+                    if self.curr_local_scenario != None:
+                        if self.curr_local_scenario.running:
+                            self.curr_local_scenario.npc_refresh()
+                    frame_record = self.curr_local_scenario.evaluate_snapshot_record(
+                        world_ss)
+                    self.result_saver.frames_record.append(frame_record)
 
         self.close()
         logger.info('[Simulator] === Simulation End === ')
@@ -657,16 +720,15 @@ class Simulator(object):
 
     def close(self):
         logger.warning("Simulation Shutting down.")
-        timeout = 20
         if self.closing:
             logger.warning('Other thread closing simulation, waiting')
-        while self.closing and timeout > 0:
-            time.sleep(0.01)
-            timeout -= 0.01
-        if self.closed:
-            logger.warning("Force Killing")
-            os.kill(os.getpid(), signal.SIGKILL)
-            return
+            timeout = 20
+            while self.closing and timeout > 0:
+                time.sleep(0.01)
+                timeout -= 0.01
+            if not self.closed:
+                logger.warning("Force Killing")
+                sys.exit()
         self.closing = True
         logger.warning("Into Simulation Shutting down Program.")
 
@@ -698,24 +760,27 @@ class Simulator(object):
             self.scene_segmentation.stop_vehicle_listening()
             logger.warning("[Shutdown] Vehicle listening stoped")
 
-        print('[Shutdown] cls', self.curr_local_scenario)
+        logger.warning(f'[Shutdown] cls, {self.curr_local_scenario}')
         if self.curr_local_scenario != None:
-            self.curr_local_scenario.scenario_end()
+            if self.curr_local_scenario.running:
+                self.curr_local_scenario.scenario_end()
             logger.warning("[Shutdown] Current scenario unloaded")
             self.curr_local_scenario = None
-        print('[Shutdown] nls', self.next_local_scenario)
+
+        logger.warning(f'[Shutdown] nls, {self.next_local_scenario}')
         if self.next_local_scenario:
-            self.next_local_scenario.scenario_end()
+            if self.next_local_scenario.running:
+                self.next_local_scenario.scenario_end()
             logger.warning("[Shutdown] Next scenario unloaded")
             self.next_local_scenario = None
 
-        print('[Shutdown] dv', self.dv)
+        logger.warning(f'[Shutdown] dv, {self.dv}')
         if self.dv:
             self.dv.disconnect()
             self.dv = None
             logger.warning("[Shutdown] Disconnected from Dreamview")
-            
-        print('[Shutdown] cb', self.carla_bridge)
+
+        logger.warning(f'[Shutdown] cb, {self.carla_bridge}')
         if self.carla_bridge != None:
             logger.warning("[Shutdown] Shutting down bridge")
             if self.carla_bridge.shutdown_event:
@@ -728,8 +793,7 @@ class Simulator(object):
             self.carla_bridge = None
             logger.warning("[Shutdown] Brigde destroied")
 
-
-        print('[Shutdown] cw', self.carla_world)
+        logger.warning(f'[Shutdown] cw, {self.carla_world}')
         if self.carla_world:
             del self.carla_world
             self.carla_world = None
@@ -743,7 +807,7 @@ class Simulator(object):
         self.closed = True
         self.closing = False
         logger.warning("All cleared, Force Killing")
-        os.kill(os.getpid(), signal.SIGKILL)
+        sys.exit()
 
 
 if __name__ == "__main__":
