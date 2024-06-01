@@ -66,9 +66,9 @@ class CEGA:
         if not os.path.exists(self.generation_file):
             os.makedirs(self.generation_file)
 
-        datetime = datetime.now().strftime("%Y%m%d_%H%M%S")
+        datetime_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         path = os.path.join(self.generation_file,
-                            f'cega_{self.type_str}_his_{datetime}.json')
+                            f'cega_{self.type_str}_his_{datetime_str}.json')
 
         result_dic = {}
 
@@ -157,35 +157,13 @@ class CEGA:
 
             self.ind_vehicle_max_count = 1.5 * self.lane_num
 
-    # def evaluate(self, walker_ind: GeneNpcWalkerList, vehicle_ind: GeneNpcVehicleList):
-    #     '''
-    #         1. Target:
-    #             wait for evaluate result
-    #             then return <walker_fitness, vehicle_fitness>
-    #         2. for all individuals:
-    #             f_distance: the minimum distance between ego and other npcs during the simulation time t
-    #             f_smooth : represents the ego vehicle's acceleration during a scene
-    #             f_diversity: diversity of the scene
-    #         3. for npc_walkers:
-    #             f_crossing_time : Time taken to cross the road
-    #         4. for npc_vehicles:s
-    #             f_interaction_rate: the rate at which vehicles interact with the ego vehicle
-    #     '''
-    #     evaluate_obj = Evaluate_Object(walker_ind, vehicle_ind)
-
-    #     self.evaluate_list.append(evaluate_obj)
-
-    #     while not self.stop_event.is_set():
-    #         # wait for result
-    #         if evaluate_obj.is_evaluated:
-    #             return evaluate_obj.fitness
-    #     return -1, -1, -1, -1, -1
-
     def mate_walkers(self, ind1: GeneNpcWalkerList, ind2: GeneNpcWalkerList):
         offspring1 = GeneNpcWalkerList(max_count=self.ind_walker_max_count)
         offspring2 = GeneNpcWalkerList(max_count=self.ind_walker_max_count)
 
         for index in range(min(len(ind1.list), len(ind2.list))):
+            if len(offspring1.list) >= self.ind_walker_max_count:
+                break
             parent1 = ind1.list[index]
             parent2 = ind2.list[index]
 
@@ -211,6 +189,8 @@ class CEGA:
             offspring2.list.append(walker2)
 
         for index in range(min(len(ind1.list), len(ind2.list)), max(len(ind1.list), len(ind2.list))):
+            if len(offspring1.list) >= self.ind_walker_max_count:
+                break
             if len(ind1.list) > len(ind2.list):
                 offspring1.list.append(deepcopy(ind1.list[index]))
                 offspring2.list.append(deepcopy(ind1.list[index]))
@@ -225,6 +205,8 @@ class CEGA:
         offspring2 = GeneNpcVehicleList(max_count=self.ind_vehicle_max_count)
 
         for index in range(min(len(ind1.list), len(ind2.list))):
+            if len(offspring1.list) >= self.ind_vehicle_max_count:
+                break
             parent1 = ind1.list[index]
             parent2 = ind2.list[index]
 
@@ -257,6 +239,8 @@ class CEGA:
             offspring2.list.append(vehicle2)
 
         for index in range(min(len(ind1.list), len(ind2.list)), max(len(ind1.list), len(ind2.list))):
+            if len(offspring1.list) >= self.ind_vehicle_max_count:
+                break
             if len(ind1.list) > len(ind2.list):
                 offspring1.list.append(deepcopy(ind1.list[index]))
                 offspring2.list.append(deepcopy(ind1.list[index]))
@@ -503,7 +487,7 @@ class CEGA:
                                            vehicle_ind,
                                            id=(walker_ind.id, vehicle_ind.id))
             self.evaluate_list.append(evaluate_obj)
-
+        print('[evaluate_pop] evaluate_list:', len(self.evaluate_list))
         # wait until all evaluate_obj are evaluated
         all_evaluated = False
         while not all_evaluated:

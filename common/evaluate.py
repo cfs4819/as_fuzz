@@ -123,6 +123,8 @@ class Evaluate_Object:
                           prediction_time=1,
                           time_step=0.05,
                           collision_distance=2.0):
+        if actor1 is None or actor2 is None:
+            return False, None
         # Initial conditions
         position1 = actor1.get_transform().location
         velocity1 = actor1.get_velocity()

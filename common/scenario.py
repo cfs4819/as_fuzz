@@ -666,6 +666,8 @@ class LocalScenario(object):
 
         walker_in_road = 0
         for walker in npc_walkers_ss:
+            if walker == None:
+                continue
             if is_point_in_any_crosswalk(walker.get_transform().location, self.crosswalk_list):
                 walker_in_road += 1
 
