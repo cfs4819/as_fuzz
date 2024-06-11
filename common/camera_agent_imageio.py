@@ -196,8 +196,9 @@ class ScenarioRecorder:
             self.tpp_cam.destroy()
             self.fpp_cam.destroy()
             self.back_cam.destroy()
-        except RuntimeError:
-            print("Camera already destroyed")
+        except Exception as e:
+            print("Removing Cams", e)
+        print("Camera already destroyed")
 
 if __name__ == '__main__':
     client = carla.Client("172.17.0.1", 5000)

@@ -3,4 +3,5 @@ deap
 websocket-client
 packaging
 imageio 
-imageio-ffmpeg
+imageio-ffmpeg==0.4.2
+importlib_resources

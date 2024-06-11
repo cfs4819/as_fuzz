@@ -568,10 +568,10 @@ class RandomScenario():
 
         self.result_saver.set_save_path(sce_result_path)
 
-        self.result_saver.result_to_save['video_path'] = sce_video_path
-
         self.result_saver.clear_result()
 
+        self.result_saver.result_to_save['video_path'] = sce_video_path
+        
         curr_loc = self.ego_vehicle.get_location()
         self.result_saver.result_to_save['start_loc'] = {
             'x': curr_loc.x,
