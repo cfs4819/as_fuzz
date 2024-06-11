@@ -189,11 +189,21 @@ class ResultSaver(object):
 
                 pre_colli_cunt = 0
                 this_frame_has_colli = False
+                npcs_pos = []
                 for npc_ss in npcs_ss:
+                    if npc_ss == None:
+                        continue
                     will_collide, t = predict_collision(ego_ss, npc_ss)
                     pre_colli_cunt += 1 if will_collide else 0
                     if will_collide:
                         this_frame_has_colli = True
+                    npc_loc = npc_ss.get_transform().location
+                    npcs_pos.append({
+                        'x': npc_loc.x,
+                        'y': npc_loc.y,
+                        'z': npc_loc.z,
+                        'will_collide': will_collide
+                    })
 
                 will_collide_frame_cnt += 1 if this_frame_has_colli else 0
                 will_collide_rate = pre_colli_cunt / \
@@ -202,7 +212,8 @@ class ResultSaver(object):
                 interaction_per_frame.append({
                     'timestamp': frame['timestamp'],
                     'frame_num': frame['frame'],
-                    'interaction_rate': will_collide_rate
+                    'interaction_rate': will_collide_rate,
+                    'npcs_pos':npcs_pos
                 })
 
                 pre_frame = frame
