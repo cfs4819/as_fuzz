@@ -41,7 +41,23 @@ class Config:
         # self.dreamview_map = "Carla Town04"
         self.dreamview_vehicle = "Lincoln2017MKZ LGSVL"
         self.dreamview_ip  = "localhost"
-        self.dreamview_port  = 8888
+        self.dreamview_port  = 8888        
+        self.dreamview_map_dic = {
+            'town01':   'Carla Town01',
+            'Town01':   'Carla Town01',
+            
+            'town02':   'Carla Town02',
+            'Town02':   'Carla Town02',
+            
+            'town04':   'Carla Town04',
+            'Town04':   'Carla Town04',
+            
+            'town07':   'Carla Town07',
+            'Town07':   'Carla Town07',
+            
+            'town10hd': 'Carla Town10hd',
+            'Town10hd': 'Carla Town10hd'
+        }
 
         # Fuzzer config
         self.scenario_length = 30
@@ -58,6 +74,13 @@ class Config:
 
         # Fuzzing metadata
         self.town = None
+        self.town_name = {
+            "1": "Town01",
+            "2": "Town02",
+            "4": "Town04",
+            "7": "Town07",
+            "10": "Town10hd",
+        }
         self.cur_time = None
         self.determ_seed = None
         self.out_dir = '/apollo/data/MS_fuzz/result'

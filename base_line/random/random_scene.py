@@ -411,8 +411,8 @@ class RandomScenario():
             self.random_scenario.scenario_end()
 
         logger.warning("[Shutdown] Brigde destroied")
-        if self.carla_bridge.shutdown:
-            self.carla_bridge.shutdown.set()
+        if self.carla_bridge.shutdown_event:
+            self.carla_bridge.shutdown_event.set()
         self.carla_bridge.destroy()
         self.carla_bridge = None
         self.ego_vehicle = None
@@ -726,8 +726,8 @@ class RandomScenario():
                 settings.fixed_delta_seconds = None
                 self.carla_world.apply_settings(settings)
             if self.carla_bridge:
-                if self.carla_bridge.shutdown:
-                    self.carla_bridge.shutdown.set()
+                if self.carla_bridge.shutdown_event:
+                    self.carla_bridge.shutdown_event.set()
                 self.carla_bridge.destroy()
             self.carla_bridge = None
             logger.warning("[Shutdown] Brigde destroied")
@@ -753,9 +753,17 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Simulation configuration")
     parser.add_argument('-p', '--port', type=int, default=4000,
                         help='Set the simulation port (default: 4000)')
+    parser.add_argument("--town", default=10, type=int,
+                           help="Test on a specific town (e.g., '--town 3' forces Town03)")
     args = parser.parse_args()
+    
     cfg = Config()
     cfg.sim_port = args.port
+    
+    town_index = args.town
+    cfg.carla_map = cfg.town_name[str(town_index)]
+    cfg.dreamview_map = cfg.dreamview_map_dic[cfg.carla_map]
+    
     sim = RandomScenario(cfg)
     sim.initialization()
     sim.main_loop()

@@ -28,12 +28,18 @@ def set_args():
                                  help="Hostname of Carla simulation server")
     argument_parser.add_argument("-p", "--sim-port", default=5000, type=int,
                                  help="RPC port of Carla simulation server")
+    argument_parser.add_argument("--town", default=10, type=int,
+                           help="Test on a specific town (e.g., '--town 3' forces Town03)")
     return argument_parser
 
 
 class MS_FUZZ(object):
     def __init__(self, args):
         self.conf = Config()
+        
+        town_index = args.town
+        self.conf.carla_map = self.conf.town_name[str(town_index)]
+        self.conf.dreamview_map = self.conf.dreamview_map_dic[self.conf.carla_map]
         # self.conf.sim_port = args.port
 
         self.eva_req_queue = multiprocessing.Queue()
