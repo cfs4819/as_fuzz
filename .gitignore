@@ -4,6 +4,5 @@
 __pycache__/
 *.py[cod]
 *$py.class
-base_line/command_execution_log.txt
-base_line/drivefuzz*
+baseline/drivefuzz_apollo/seed*
 command_execution_log.txt
