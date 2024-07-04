@@ -168,7 +168,7 @@ class Simulator(object):
             sp_tf = sp_wp.transform
             sp_pose = carla_transform_to_cyber_pose(sp_tf)
             sp_dic = {"x": sp_pose.position.x,
-                      "y": sp_pose.position.y,
+                      "y": -sp_pose.position.y,
                       "z": sp_pose.position.z + 2,
                       "roll": sp_tf.rotation.roll,
                       "pitch": sp_tf.rotation.pitch,
@@ -220,6 +220,7 @@ class Simulator(object):
         time.sleep(2)
         retry_times = 0
         self.ego_vehicle = None
+        logger.info("[Simulator] Waiting for carla_bridge")
         while True:
             print("[*] Waiting for carla_bridge "
                   + "." * retry_times + "\r", end="")
@@ -229,6 +230,7 @@ class Simulator(object):
                     self.ego_vehicle = vehicle
                     break
             if self.ego_vehicle:
+                logger.info("[Simulator] Ego vehicle found")
                 break
             if retry_times > 5:
                 print("\n check if the carla_bridge is loaded properly")
@@ -240,6 +242,7 @@ class Simulator(object):
             self.ego_vehicle,
             ip=self.cfgs.dreamview_ip,
             port=str(self.cfgs.dreamview_port))
+        time.sleep(2)
         return True
 
     def initialization(self):
@@ -271,6 +274,8 @@ class Simulator(object):
         self.unsafe_detector.register_callback(self.on_unsafe)
         self.unsafe_detector.init_sensors()
 
+        logger.info('[Simulator] Recorder and Detector initialized')
+
         self.scene_segmentation = SceneSegment(self.carla_world,
                                                self.ego_vehicle,
                                                logger=logger,
@@ -280,22 +285,24 @@ class Simulator(object):
 
         times = 0
         success = False
+        self.destination = self.select_valid_dest(min_radius=100, max_radius=9999)
+        logger.info('[Simulator] setting up apollo')
         while times < 3:
             try:
                 time.sleep(2)
                 self.dv.set_hd_map(self.cfgs.dreamview_map)
                 self.dv.set_vehicle(self.cfgs.dreamview_vehicle)
                 self.dv.set_setup_mode('Mkz Standard Debug')
-                self.destination = self.select_valid_dest()
                 self.dv.enable_apollo(self.destination, self.modules)
                 success = True
+                times += 1
                 break
-            except:
+            except Exception as e:
                 logger.warning(
-                    '[Simulator] Fail to spin up apollo, try again!')
+                    '[Simulator] Fail to spin up apollo, try again!', e)
                 times += 1
         if not success:
-            raise RuntimeError('Fail to spin up apollo')
+            self.close()
         self.dv.set_destination_tranform(self.destination)
         route_req_time = time.time()
         logger.info(
@@ -310,17 +317,39 @@ class Simulator(object):
         logger.info(f"[Simulator] World is set to {synchronous_mode_str} mode")
         logger.info(f"[Simulator] Running ...")
 
+        # Define the timeout period and retry attempts
+        timeout_period = 15
+        retry_attempts = 6
+
         logger.info("[Simulator] Waiting for Apollo to find the route")
-        if not self.scene_segmentation.wait_for_route(
-                route_req_time, wait_from_req_time=True):
-            raise KeyboardInterrupt
+
+        time.sleep(2)
+        self.dv.set_destination_tranform(self.destination)
+        for attempt in range(retry_attempts):
+            if not self.scene_segmentation.wait_for_route(
+                    route_req_time, wait_from_req_time=True, timeout=timeout_period):
+                logger.warning(
+                    f"[Simulator] Apollo failed to find the route, retry {attempt + 1}")
+                self.dv.set_destination_tranform(self.destination)
+            else:
+                logger.info("[Simulator] Apollo found the route")
+                break
+        else:
+            logger.warning(
+                "[Simulator] Apollo failed to find the route, give up")
+            self.close()
+
         self.scene_segmentation.get_segments(self.cfgs.scenario_length,
                                              self.cfgs.scenario_width)
+        logger.info('[Simulator] Scene Segmentation Initialized')
+        logger.info(f'[Simulator] Gained {len(self.scene_segmentation.segments)} segs')
         self.scene_segmentation.routing_listener.stop()
 
         self.scene_segmentation.strat_vehicle_pos_listening()
 
         self.unsafe_detector.start_detection()
+        
+        logger.info('[Simulator] Simulation Initialized')
 
     def feedback_eva(self, eva_result: Evaluate_Object):
         eva_result_t = Evaluate_Transfer(eva_result.res_id,
@@ -776,6 +805,7 @@ class Simulator(object):
 
         logger.warning(f'[Shutdown] dv, {self.dv}')
         if self.dv:
+            self.dv.disable_apollo()
             self.dv.disconnect()
             self.dv = None
             logger.warning("[Shutdown] Disconnected from Dreamview")

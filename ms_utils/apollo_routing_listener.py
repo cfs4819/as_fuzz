@@ -163,6 +163,8 @@ class ApolloRoutingListener:
                                               int(road_id[4]),
                                               float(int(lane_segment.end_s) - i))
             i += 1
+            if i>=lane_segment.end_s:
+                break
         return (wp_s, wp_e)
 
 

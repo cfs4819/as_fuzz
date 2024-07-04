@@ -265,6 +265,8 @@ class SceneSegment(object):
     def get_seg_from_straight_to_end_wp(self, wp: carla.Waypoint,
                                         length: float, width: float):
         segs = []
+        if wp == None:
+            return segs
         among_wps = wp.previous_until_lane_start(length)
         for among_wp in among_wps:
             segs.append(Segment(among_wp.transform.location,
@@ -286,6 +288,8 @@ class SceneSegment(object):
         segs = []
         if wp_s == None:
             segs = self.get_seg_from_straight_to_end_wp(wp_e, length, width)
+            return segs
+        if wp_e == None:
             return segs
         wp = wp_s
         max = int(wp_s.transform.location.distance(
@@ -346,15 +350,35 @@ class SceneSegment(object):
                 ).get_waypoint(start_loc)
 
         for i, route_wp in enumerate(routing_wps):
-            if route_wp[0].is_junction and route_wp[1].is_junction:
-                if i == 0:
-                    continue
-                junction_segs = self.get_seg_from_junction_wp(route_wp[0],
-                                                              length, width)
-                for seg in junction_segs:
-                    seg.belongs_to_roadid = routting_road[i]
-                self.segments += junction_segs
+            if route_wp[0] is None:
                 continue
+            if route_wp[1] is not None:
+                if route_wp[0].is_junction and route_wp[1].is_junction:
+                    if i == 0:
+                        continue
+                    junction_segs = self.get_seg_from_junction_wp(route_wp[0],
+                                                                length, width)
+                    for seg in junction_segs:
+                        seg.belongs_to_roadid = routting_road[i]
+                    self.segments += junction_segs
+                    continue
+                elif route_wp[0].is_junction and not route_wp[1].is_junction:
+                    first_segs = self.get_seg_from_straight_to_end_wp(route_wp[1],
+                                                                    length, width)
+                    for seg in first_segs:
+                        seg.belongs_to_roadid = routting_road[i]
+                    self.segments += first_segs
+                    continue
+            else:
+                if route_wp[0].is_junction:
+                    if i == 0:
+                        continue
+                    junction_segs = self.get_seg_from_junction_wp(route_wp[0],
+                                                                length, width)
+                    for seg in junction_segs:
+                        seg.belongs_to_roadid = routting_road[i]
+                    self.segments += junction_segs
+                    continue
 
             if i == len(routing_wps) - 1:
                 # handle the final segment
@@ -366,13 +390,7 @@ class SceneSegment(object):
                 self.segments += final_segs
                 continue
                 
-            if route_wp[0].is_junction and not route_wp[1].is_junction:
-                first_segs = self.get_seg_from_straight_to_end_wp(route_wp[1],
-                                                                  length, width)
-                for seg in first_segs:
-                    seg.belongs_to_roadid = routting_road[i]
-                self.segments += first_segs
-                continue
+            
             # elif not route_wp[0].is_junction and route_wp[1].is_junction:
             #     last_segs = self.get_seg_from_straight_to_end_wp(route_wp[0],
             #                                                      length, width)

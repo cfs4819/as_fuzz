@@ -627,11 +627,17 @@ class RandomScenario():
                 if not self.sim_status:
                     break
                 self.dv.enable_apollo(self.destination, self.modules)
+                started = False
                 for i in range(3):
                     self.dv.set_destination_tranform(self.destination)
                     if self.wait_until_vehicle_moving(2):
                         logger.info('[Simulator] Vehicle is started')
+                        started = True
                         break
+                if not started:
+                    logger.info('[Simulator] Vehicle is not started')
+                    self.sim_status = False
+                    break
                 self.sce_index += 1
                 self.start_record()
                 self.simulation_timeout.reset()

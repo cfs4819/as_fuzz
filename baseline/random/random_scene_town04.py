@@ -90,7 +90,7 @@ class RandomScenario():
 
         self.modules = [
             # 'Localization',  # ok
-            # 'Transform',  # ok
+            'Transform',  # ok
             'Routing',
             'Prediction',  # ok
             'Planning',  # ok
@@ -133,6 +133,8 @@ class RandomScenario():
 
         self.max_reload = 20
         self.curr_reload = 0
+        
+        self.resent_dest = 0
 
         # Set a 10 minute timeout
         self.simulation_timeout = SimulationTimeoutTimer(10 * 60,
@@ -384,10 +386,10 @@ class RandomScenario():
         logger.info('[Simulator] Waiting for the vehicle to move')
 
         running = False
-        for i in range(5):
+        for i in range(10):
             logger.info(f'[Simulator] Trying to set destination:{i}')
             self.dv.set_destination_tranform(self.destination)
-            if self.wait_until_vehicle_moving(10):
+            if self.wait_until_vehicle_moving(3):
                 logger.info('[Simulator] Vehicle is started')
                 running = True
                 break
@@ -443,9 +445,13 @@ class RandomScenario():
         near_by_tf = self.carla_map.get_waypoint(
             self.ego_vehicle.get_location()).transform
 
-        if type == UNSAFE_TYPE.STUCK:
-            # stucked, need to move to another place
-            near_by_tf = None
+        if type == UNSAFE_TYPE.STUCK and self.resent_dest < 3:
+            self.resent_dest += 1
+            if self.dv:
+                self.dv.set_destination_tranform(self.destination) 
+                if self.wait_until_vehicle_moving(3):
+                    self.resent_dest = 0
+            return
 
         if type in [UNSAFE_TYPE.COLLISION, UNSAFE_TYPE.STUCK]:
             # collision, or stuck, need to clear others
@@ -604,7 +610,8 @@ class RandomScenario():
         self.random_scenario.spawn_all_npcs()
         
         for w in self.random_scenario.npc_walker_list:
-            w.ai_controller.start()
+            if w.ai_controller:
+                w.ai_controller.start()
         
         for v in self.random_scenario.npc_vehicle_list:
             if v.vehicle:
