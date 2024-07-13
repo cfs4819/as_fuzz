@@ -22,8 +22,8 @@ def set_args():
     argument_parser = argparse.ArgumentParser()
     argument_parser.add_argument("-o", "--out-dir", default="output", type=str,
                                  help="Directory to save fuzzing logs")
-    argument_parser.add_argument("-m", "--max-mutations", default=5, type=int,
-                                 help="Size of the mutated population per cycle")
+    # argument_parser.add_argument("-m", "--max-mutations", default=5, type=int,
+    #                              help="Size of the mutated population per cycle")
     argument_parser.add_argument("-u", "--sim-host", default="localhost", type=str,
                                  help="Hostname of Carla simulation server")
     argument_parser.add_argument("-p", "--sim-port", default=5000, type=int,
