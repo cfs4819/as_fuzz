@@ -42,7 +42,7 @@ Install dependencies in apollo container
 cd path_to_apollo
 ./docker/script/dev_into.sh
 # inside apollo container
-cd /apollo/modules/as_fuzz & pip install -r requirement.txt
+cd /apollo/modules/as_fuzz & pip install -r requirements.txt
 ```
 
 ### 3. Running
@@ -61,6 +61,13 @@ Our experiments found 37 defects in Apollo, which we describe in the ['_Some key
 
 If you use this code in your research, please cite our paper:
 ```
-@inproceedings{
+@inproceedings{chen2024asfuzzer,
+  author    = {Fansong Chen and Shenghao Lin and Weicheng Lin and Laile Xi and Yongji Liu and Lun Li and Hongsong Zhu},
+  title     = {AS-Fuzzer: An Optimized ADS Fuzzing Method via Scenario Segmentation and Parallel Evolution},
+  booktitle = {Proceedings of the Asia-Pacific Software Engineering Conference (APSEC 2024)},
+  year      = {2024},
+  url       = {https://conf.researchr.org/details/apsec-2024/apsec-2024-technical-track/27/AS-Fuzzer-An-Optimized-ADS-Fuzzing-Method-via-Scenario-Segmentation-and-Parallel-Evo},
+  note      = {Accessed: 2024-12-23}
 }
+
 ```
