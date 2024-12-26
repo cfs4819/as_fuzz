@@ -206,7 +206,7 @@ class RandomScenario():
 
     def load_carla_bridge(self, ego_spawn_point: dict = None):
         '''
-            parameter: 
+            parameter:
                 ego_spawn_point: the point ego vehicle to spawn
                     type: dict{
                         'x': float,
@@ -571,7 +571,7 @@ class RandomScenario():
         self.result_saver.clear_result()
 
         self.result_saver.result_to_save['video_path'] = sce_video_path
-        
+
         curr_loc = self.ego_vehicle.get_location()
         self.result_saver.result_to_save['start_loc'] = {
             'x': curr_loc.x,
@@ -657,7 +657,7 @@ class RandomScenario():
         self.loading_random_scenario = True
         self.random_scenario = LocalScenario(self.carla_world,
                                              self.ego_vehicle,
-                                             logger=logger)
+                                             logger=logger,carla_map=self.carla_map)
 
         spawn_points = self.carla_world.get_map().get_spawn_points()
 
@@ -762,14 +762,14 @@ if __name__ == '__main__':
     parser.add_argument("--town", default=10, type=int,
                            help="Test on a specific town (e.g., '--town 3' forces Town03)")
     args = parser.parse_args()
-    
+
     cfg = Config()
     cfg.sim_port = args.port
-    
+
     town_index = args.town
     cfg.carla_map = cfg.town_name[str(town_index)]
     cfg.dreamview_map = cfg.dreamview_map_dic[cfg.carla_map]
-    
+
     sim = RandomScenario(cfg)
     sim.initialization()
     sim.main_loop()

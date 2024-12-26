@@ -111,13 +111,13 @@ class LocalScenario(object):
     def __init__(self,
                  carla_world: carla.World,
                  ego_vhicle: carla.Vehicle,
-                 logger=logger):
+                 logger=logger,carla_map = None):
         self.id = ''
         self.scen_seg: Segment = None
         self.logger = logger
         self.ego: carla.Vehicle = ego_vhicle
         self.carla_world: carla.World = carla_world
-        self.carla_map: carla.Map = self.carla_world.get_map()
+        self.carla_map: carla.Map = carla_map
 
         self.scenario_start_time: carla.Timestamp = self.carla_world.get_snapshot().timestamp
 
@@ -214,23 +214,23 @@ class LocalScenario(object):
         Add a specified vehicle into vehicle list, but have not spawned it
 
             Parameters:
-                start_loc       :   The starting location of the NPC vehicle, 
+                start_loc       :   The starting location of the NPC vehicle,
                                     specified as a dictionary with keys 'x' and 'y'.
-                end_loc         :   The ending location of the NPC vehicle, 
+                end_loc         :   The ending location of the NPC vehicle,
                                     specified as a dictionary with keys 'x' and 'y'.
-                start_time      :   The starting time of the NPC vehicle's movement. 
+                start_time      :   The starting time of the NPC vehicle's movement.
                                     In seconds. Max 2s.
                 behavior_type   :   Indicate the working status of the vehicle.
                                     0: driving,
                                     1: starting,
                                     2: parked.
-                agent_type      :   The type of agent controlling the NPC vehicle, 
-                                    0: normal, 
-                                    1: cautious, 
+                agent_type      :   The type of agent controlling the NPC vehicle,
+                                    0: normal,
+                                    1: cautious,
                                     2: aggressive.
                 start_speed     :   The initial speed of the NPC vehicle,
                                     defaults to 0.0 if not specified.
-                blueprint       :   The blueprint of the NPC vehicle, 
+                blueprint       :   The blueprint of the NPC vehicle,
                                     if not provided, a random blueprint will be used.
                 bp_type         :   The type of blueprint used for the NPC vehicle.
                                     0: Car,
@@ -240,7 +240,7 @@ class LocalScenario(object):
                                     4: Bicycle.
                 vehicle_id      :   Optional identifier for the NPC vehicle.
 
-            Returns             :   None. This function doesn't return anything.    
+            Returns             :   None. This function doesn't return anything.
 
 
         '''
@@ -322,18 +322,18 @@ class LocalScenario(object):
         Add a specified walker into the walker list, but have not spawned it.
 
             Parameters:
-                start_loc       :   The starting location of the NPC walker, 
+                start_loc       :   The starting location of the NPC walker,
                                     specified as a dictionary with keys 'x' and 'y'.
-                end_loc         :   The ending location of the NPC walker, 
+                end_loc         :   The ending location of the NPC walker,
                                     specified as a dictionary with keys 'x' and 'y'.
-                start_time      :   The starting time of the NPC walker's movement. 
+                start_time      :   The starting time of the NPC walker's movement.
                                     In seconds.
                 behavior_type   :   Indicate the behavior type of the walker.
                                     0: walking,
                                     1: stopped.
-                max_speed       :   The maximum speed of the NPC walker, 
+                max_speed       :   The maximum speed of the NPC walker,
                                     defaults to 1.4 if not specified.
-                blueprint       :   The blueprint of the NPC walker, 
+                blueprint       :   The blueprint of the NPC walker,
                                     if not provided, a random blueprint will be used.
                 walker_id       :   Optional identifier for the NPC walker.
 

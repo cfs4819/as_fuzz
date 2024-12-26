@@ -164,7 +164,7 @@ class UnsafeDetector(object):
 
         road_ids, section_ids, lane_ids = set(), set(), set()
         for corner in corners:
-            waypoint = self.world.get_map().get_waypoint(corner, project_to_road=False)
+            waypoint = self.map.get_waypoint(corner, project_to_road=False)
             if not waypoint:
                 continue
             road_ids.add(waypoint.road_id)

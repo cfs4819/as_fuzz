@@ -7,7 +7,7 @@ import carla
 
 
 class PlanningListener:
-    def __init__(self, carla_world,logger):
+    def __init__(self, carla_world, logger):
         self.world = carla_world
         self.plan_points = []
         self.logger = logger
@@ -15,6 +15,9 @@ class PlanningListener:
 
         self.stop_signal = False
         self.main_thread = None
+
+        self.stop_reason = None  
+        self.stop_reason_lock = threading.Lock()  
 
     def start(self):
         self.main_thread = threading.Thread(target=self.run)
@@ -46,6 +49,26 @@ class PlanningListener:
             self.plan_points = new_plan_points
 
         self.update_debug_drawings()
+        self.extract_stop_reason(planning_data)  
+
+    def extract_stop_reason(self, planning_data: planning_pb2.ADCTrajectory):
+        """Extract stop reason from planning data."""
+        stop_decision = planning_data.decision.main_decision.stop
+        stop_reason_code = stop_decision.reason_code  
+        stop_reason_description = stop_decision.reason  
+
+        with self.stop_reason_lock:
+            self.stop_reason = {
+                "reason_code": stop_reason_code,
+                "reason_description": stop_reason_description
+            }
+
+        print(f"Stop reason detected: {self.stop_reason}")
+
+    def get_stop_reason(self):
+        """Retrieve the last detected stop reason."""
+        with self.stop_reason_lock:
+            return self.stop_reason
 
     def update_debug_drawings(self):
         with self.lock:
@@ -62,12 +85,16 @@ if __name__ == "__main__":
     client = carla.Client('172.17.0.1', 5000)
     world = client.get_world()
 
-    planning_listener = PlanningListener(world)
+    logger = None  
+    planning_listener = PlanningListener(world, logger)
     planning_listener.start()
 
     try:
         while True:
             time.sleep(1)
+            stop_reason = planning_listener.get_stop_reason()
+            if stop_reason:
+                print(f"Current stop reason: {stop_reason}")
     except KeyboardInterrupt:
         print("KeyboardInterrupt")
         planning_listener.stop()

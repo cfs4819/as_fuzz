@@ -46,12 +46,12 @@ class ApolloRoutingListener:
             time.sleep(0.1)
         if self.logger != None:
             self.logger.info("routing_listener_node shutting down")
-        
+
         del self.subscriber
         del self.node
 
         # we don't stop cyber here
-        # cyber.shutdown() 
+        # cyber.shutdown()
 
     def stop(self):
         self.stop_signal = True
@@ -83,7 +83,7 @@ class ApolloRoutingListener:
                                      f"{segment.id}\n start",
                                      life_time=10)
                     time.sleep(1)
-                        
+
                     if lane_wp_e != None:
                         self.world.debug.draw_point(lane_wp_e.transform.location +
                                     carla.Location(0, 0, 2), life_time=10)
@@ -109,7 +109,7 @@ class ApolloRoutingListener:
             for i,wp in enumerate(self.routing_wps[:-1]):
                 if wp[0] == None or wp[1] == None:
                     continue
-                if self.debug: 
+                if self.debug:
                     self.world.debug.draw_point(wp[0].transform.location +
                                 carla.Location(0, 0, 1), life_time=20)
                     self.world.debug.draw_string(wp[0].transform.location,
@@ -118,14 +118,14 @@ class ApolloRoutingListener:
                 try:
                     next_wps = wp[0].next_until_lane_end(5)
                     drawing_wps += next_wps
-                except RuntimeError as e:               
+                except RuntimeError as e:
                     try:
                         prev_wps = wp[1].previous_until_lane_start(5)
                         prev_wps.reverse()
                         drawing_wps += prev_wps
-                    except RuntimeError as e:                            
-                        if self.debug and self.logger != None: 
-                            self.logger.warning(f'wp #{i}: fail {e}')  
+                    except RuntimeError as e:
+                        if self.debug and self.logger != None:
+                            self.logger.warning(f'wp #{i}: fail {e}')
                         drawing_wps.append(wp[0])
                         continue
             try:
@@ -133,10 +133,10 @@ class ApolloRoutingListener:
                 final_seg.reverse()
                 drawing_wps += final_seg
             except RuntimeError as e:
-                if self.debug and self.logger != None: 
+                if self.debug and self.logger != None:
                     self.logger.warning(f'wp #{-1}: previous_until_lane_start {e}')
                 drawing_wps.append(self.routing_wps[-1][1])
-                
+
 
         for wpt in drawing_wps:
             wpt_t = wpt.transform
@@ -168,9 +168,9 @@ class ApolloRoutingListener:
         return (wp_s, wp_e)
 
 
-if __name__ == '__main__':    
+if __name__ == '__main__':
     from loguru import logger
-    client = carla.Client('172.17.0.1', 5000)
+    client = carla.Client('172.17.0.1', 4000)
     world = client.get_world()
 
     cyber.init()

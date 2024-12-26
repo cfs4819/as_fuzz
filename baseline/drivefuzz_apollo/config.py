@@ -43,12 +43,12 @@ class Config:
     def __init__(self):
         self.debug = False
 
-        # reload carla port 
+        # reload carla port
         self.reload_carla_port = 7691
-        
+
         # simulator config
         self.sim_host = "localhost"
-        self.sim_port = 2000
+        self.sim_port = 4000
         self.sim_tm_port = 8000
         self.town = 3
 
@@ -73,16 +73,16 @@ class Config:
         self.dreamview_map = {
             'town01':   'Carla Town01',
             'Town01':   'Carla Town01',
-            
+
             'town02':   'Carla Town02',
             'Town02':   'Carla Town02',
-            
+
             'town04':   'Carla Town04',
             'Town04':   'Carla Town04',
-            
+
             'town07':   'Carla Town07',
             'Town07':   'Carla Town07',
-            
+
             'town10hd': 'Carla Town10hd',
             'Town10hd': 'Carla Town10hd'
         }
@@ -95,7 +95,7 @@ class Config:
             'Control',
             'Storytelling'  # ok
         ]
-        
+
         # Target config
         self.agent_type = c.APOLLO  # c.APOLLO
 
@@ -113,7 +113,7 @@ class Config:
         self.function = "general"   # Functionality to test (general / collision / traction), default="general"
 
         self.strategy = c.ALL       # Input mutation strategy (all / congestion / entropy / instability / trajectory)
-        
+
         # Sim-debug settings
         self.view = c.BIRDSEYE
 
