@@ -111,7 +111,7 @@ class LocalScenario(object):
     def __init__(self,
                  carla_world: carla.World,
                  ego_vhicle: carla.Vehicle,
-                 logger=logger,carla_map = None):
+                 logger=logger, carla_map=None):
         self.id = ''
         self.scen_seg: Segment = None
         self.logger = logger
@@ -256,8 +256,8 @@ class LocalScenario(object):
             carla.Location(x=start_loc['x'],
                            y=start_loc['y'], z=start_loc['z']),
             project_to_road=True,
-            lane_type=(carla.LaneType.Driving if behavior_type ==
-                       0 else carla.LaneType.Shoulder)
+            lane_type=(carla.LaneType.Driving if behavior_type
+                       == 0 else carla.LaneType.Shoulder)
         )
 
         start_waypoint_tf = start_waypoint.transform
@@ -473,7 +473,7 @@ class LocalScenario(object):
 
         self.running = True
 
-    def scenario_end(self)->Evaluate_Object:
+    def scenario_end(self) -> Evaluate_Object:
         self.remove_all_npcs()
         if self.evaluate_obj:
             self.evaluate_obj.evaluate()
@@ -489,9 +489,9 @@ class LocalScenario(object):
                 if vehicle.close_event.is_set():
                     break
                 # 1. wait until vehicle can run
-                if (not vehicle.is_running and
-                    not vehicle.close_event.is_set()
-                    ):
+                if (not vehicle.is_running
+                            and not vehicle.close_event.is_set()
+                        ):
                     # Check if it's time for this vehicle to run
                     curr_time = self.carla_world.get_snapshot().timestamp
                     time_passed = curr_time.elapsed_seconds - \
@@ -506,8 +506,8 @@ class LocalScenario(object):
                     break
 
                 # 2. Once the vehicle starts running, wait for refresh signal from main thread
-                elif (vehicle.is_running and
-                      not vehicle.close_event.is_set()):
+                elif (vehicle.is_running
+                      and not vehicle.close_event.is_set()):
 
                     # Apply control to the vehicle
                     ctrl = vehicle.agent.run_step(debug=True)
