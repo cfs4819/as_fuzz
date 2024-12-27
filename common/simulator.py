@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Dict
 from loguru import logger
 from multiprocessing import Queue
+from shapely.geometry import Polygon
 
 from MS_fuzz.fuzz_config.Config import Config
 from MS_fuzz.ms_utils import calc_relative_loc
@@ -365,6 +366,92 @@ class Simulator(object):
             'eva_obj': eva_result_t
         }
         self.eva_req_queue.put(req_dic)
+
+    def detect_front_vehicle_obstacle(self, max_distance=10, up_angle_th=90, low_angle_th=0):
+        """
+        Check if there is a vehicle in front of the ego vehicle blocking its path when the ego is stationary.
+
+        Args:
+            ego_vehicle (carla.Vehicle): The ego vehicle object.
+            world (carla.World): Carla world object to access other actors and map.
+            max_distance (float): Maximum detection distance in front of the ego vehicle.
+            up_angle_th (float): Upper angle threshold for detection range.
+            low_angle_th (float): Lower angle threshold for detection range.
+
+        Returns:
+            tuple: (bool, carla.Vehicle or None)
+                - bool: True if a vehicle is blocking the path, False otherwise.
+                - carla.Vehicle: The blocking vehicle object, or None if no vehicle is detected.
+        """
+        def get_route_polygon():
+            """
+            Generate a polygon representing the area in front of the ego vehicle's route.
+            """
+            route_bb = []
+            extent_y = self.ego_vehicle.bounding_box.extent.y
+            r_ext = extent_y
+            l_ext = -extent_y
+            r_vec = ego_transform.get_right_vector()
+            p1 = ego_location + \
+                carla.Location(r_ext * r_vec.x, r_ext * r_vec.y)
+            p2 = ego_location + \
+                carla.Location(l_ext * r_vec.x, l_ext * r_vec.y)
+            route_bb.extend([[p1.x, p1.y, p1.z], [p2.x, p2.y, p2.z]])
+
+            for wp, _ in local_planner.get_plan():
+                if ego_location.distance(wp.transform.location) > max_distance:
+                    break
+                r_vec = wp.transform.get_right_vector()
+                p1 = wp.transform.location + \
+                    carla.Location(r_ext * r_vec.x, r_ext * r_vec.y)
+                p2 = wp.transform.location + \
+                    carla.Location(l_ext * r_vec.x, l_ext * r_vec.y)
+                route_bb.extend([[p1.x, p1.y, p1.z], [p2.x, p2.y, p2.z]])
+
+            # Ensure the polygon has enough points to form a valid shape
+            if len(route_bb) < 3:
+                return None
+
+            return Polygon(route_bb)
+
+        # Check if ego vehicle is stationary
+        velocity = self.ego_vehicle.get_velocity()
+        if velocity.x != 0 or velocity.y != 0 or velocity.z != 0:
+            return False, None  # Ego vehicle is not stationary
+
+        # Get global vehicle list
+        vehicle_list = self.carla_world.get_actors().filter("*vehicle*")
+        ego_transform = self.ego_vehicle.get_transform()
+        ego_location = ego_transform.location
+        ego_front_transform = ego_transform
+        ego_front_transform.location += carla.Location(
+            self.ego_vehicle.bounding_box.extent.x * ego_transform.get_forward_vector()
+        )
+        local_planner = self.carla_world.get_map()
+
+        # Get route bounding polygon
+        route_polygon = get_route_polygon()
+        if not route_polygon:
+            return False, None
+
+        for target_vehicle in vehicle_list:
+            if target_vehicle.id == self.ego_vehicle.id:
+                continue
+
+            target_transform = target_vehicle.get_transform()
+            if target_transform.location.distance(ego_location) > max_distance:
+                continue
+
+            # Check if the target vehicle blocks the route polygon
+            target_bb = target_vehicle.bounding_box
+            target_vertices = target_bb.get_world_vertices(target_transform)
+            target_polygon = Polygon([[v.x, v.y, v.z]
+                                     for v in target_vertices])
+
+            if route_polygon.intersects(target_polygon):
+                return True, target_vehicle
+
+        return False, None
 
     def on_unsafe(self, type, message, data=None):
         if self.on_unsafe_lock:
