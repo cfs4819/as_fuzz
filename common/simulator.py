@@ -367,7 +367,7 @@ class Simulator(object):
         }
         self.eva_req_queue.put(req_dic)
 
-    def detect_front_vehicle_obstacle(self, max_distance=10, up_angle_th=90, low_angle_th=0):
+    def detect_front_vehicle_obstacle(self, max_distance=10):
         """
         Check if there is a vehicle in front of the ego vehicle blocking its path when the ego is stationary.
 
