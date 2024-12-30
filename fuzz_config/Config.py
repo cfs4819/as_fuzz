@@ -1,11 +1,13 @@
 import os
 import sys
 
+
 def get_proj_root():
     config_path = os.path.abspath(__file__)
     src_dir = os.path.dirname(config_path)
     proj_root = os.path.dirname(src_dir)
     return proj_root
+
 
 class Config:
     """
@@ -40,20 +42,20 @@ class Config:
         self.dreamview_map = "Carla Town10hd"
         # self.dreamview_map = "Carla Town04"
         self.dreamview_vehicle = "Lincoln2017MKZ LGSVL"
-        self.dreamview_ip  = "localhost"
-        self.dreamview_port  = 8888
+        self.dreamview_ip = "localhost"
+        self.dreamview_port = 8888
         self.dreamview_map_dic = {
-            'town01':   'Carla Town01',
-            'Town01':   'Carla Town01',
+            'town01': 'Carla Town01',
+            'Town01': 'Carla Town01',
 
-            'town02':   'Carla Town02',
-            'Town02':   'Carla Town02',
+            'town02': 'Carla Town02',
+            'Town02': 'Carla Town02',
 
-            'town04':   'Carla Town04',
-            'Town04':   'Carla Town04',
+            'town04': 'Carla Town04',
+            'Town04': 'Carla Town04',
 
-            'town07':   'Carla Town07',
-            'Town07':   'Carla Town07',
+            'town07': 'Carla Town07',
+            'Town07': 'Carla Town07',
 
             'town10hd': 'Carla Town10hd',
             'Town10hd': 'Carla Town10hd'

@@ -106,15 +106,15 @@ class ApolloRoutingListener:
         if len(self.routing_wps) <= 2:
             drawing_wps = self.routing_wps
         else:
-            for i,wp in enumerate(self.routing_wps[:-1]):
+            for i, wp in enumerate(self.routing_wps[:-1]):
                 if wp[0] == None or wp[1] == None:
                     continue
                 if self.debug:
                     self.world.debug.draw_point(wp[0].transform.location +
-                                carla.Location(0, 0, 1), life_time=20)
+                                                carla.Location(0, 0, 1), life_time=20)
                     self.world.debug.draw_string(wp[0].transform.location,
-                                f"wp #{i} is_junction:{wp[0].is_junction}",
-                                life_time=20)
+                                                 f"wp #{i} is_junction:{wp[0].is_junction}",
+                                                 life_time=20)
                 try:
                     next_wps = wp[0].next_until_lane_end(5)
                     drawing_wps += next_wps
@@ -136,7 +136,6 @@ class ApolloRoutingListener:
                 if self.debug and self.logger != None:
                     self.logger.warning(f'wp #{-1}: previous_until_lane_start {e}')
                 drawing_wps.append(self.routing_wps[-1][1])
-
 
         for wpt in drawing_wps:
             wpt_t = wpt.transform
@@ -163,13 +162,14 @@ class ApolloRoutingListener:
                                               int(road_id[4]),
                                               float(int(lane_segment.end_s) - i))
             i += 1
-            if i>=lane_segment.end_s:
+            if i >= lane_segment.end_s:
                 break
         return (wp_s, wp_e)
 
 
 if __name__ == '__main__':
     from loguru import logger
+
     client = carla.Client('172.17.0.1', 4000)
     world = client.get_world()
 
@@ -178,10 +178,12 @@ if __name__ == '__main__':
     routing_listener = ApolloRoutingListener(world, debug=True, logger=logger)
     routing_listener.start()
 
+
     def signal_handler(sig, frame):
         routing_listener.stop()
         cyber.shutdown()
         exit()
+
 
     signal.signal(signal.SIGINT, signal_handler)
 

@@ -8,6 +8,7 @@ from carla import ColorConverter as cc
 import os
 from packaging import version
 
+
 # import pygame
 
 
@@ -26,12 +27,12 @@ class ScenarioRecorder:
         - ego_vehicle (carla.Vehicle): The vehicle being controlled or observed in the simulation.
         - save_folder_path (str): Directory path for saving the recordings.
         - resolution (tuple): Image resolution for recording, default (832,468). Choose from
-            [   320x180,    384x216, 
-                448x252,    512x288, 
-                576x324,    640x360, 
-                704x396,    768x432, 
-                832x468,    896x504, 
-                960x540,    1024x576    
+            [   320x180,    384x216,
+                448x252,    512x288,
+                576x324,    640x360,
+                704x396,    768x432,
+                832x468,    896x504,
+                960x540,    1024x576
                 and those larger then 1280x720
             ].
         - frame_rate (float): Recording frame rate in frames per second, default 24.0.
@@ -78,8 +79,7 @@ class ScenarioRecorder:
         self.sensor_frame = [None, None, None, None]
         self.recording_frame = np.zeros(
             (self.height * 2, self.width * 2, 3), dtype=np.uint8)
-        
-        
+
         self.top_cam.listen(self.top_img_callback)
         self.tpp_cam.listen(self.tpp_img_callback)
         self.fpp_cam.listen(self.fpp_img_callback)
@@ -155,13 +155,13 @@ class ScenarioRecorder:
                 record_array[index] = array[:, :, :3][:, :, ::-1]
 
             self.recording_frame[:self.height,
-                                 :self.width, :] = record_array[0]
+            :self.width, :] = record_array[0]
             self.recording_frame[self.height:self.height
-                                 * 2, :self.width, :] = record_array[1]
+                                             * 2, :self.width, :] = record_array[1]
             self.recording_frame[:self.height,
-                                 self.width:self.width * 2, :] = record_array[2]
+            self.width:self.width * 2, :] = record_array[2]
             self.recording_frame[self.height:self.height * 2,
-                                 self.width:self.width * 2, :] = record_array[3]
+            self.width:self.width * 2, :] = record_array[3]
 
             self.video_writer.append_data(self.recording_frame)
 
@@ -175,13 +175,13 @@ class ScenarioRecorder:
             self.recording_thread.join()
         if self.video_writer:
             self.video_writer.close()
-            
+
         self.recording_frame = np.zeros(
             (self.height * 2, self.width * 2, 3), dtype=np.uint8)
 
     def __del__(self):
         self.rm_cams()
-    
+
     def rm_cams(self):
         if self.top_cam.is_listening:
             self.top_cam.stop()
@@ -199,6 +199,7 @@ class ScenarioRecorder:
         except Exception as e:
             print("Removing Cams", e)
         print("Camera already destroyed")
+
 
 if __name__ == '__main__':
     client = carla.Client("172.17.0.1", 5000)

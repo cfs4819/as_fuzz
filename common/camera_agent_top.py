@@ -8,16 +8,17 @@ from carla import ColorConverter as cc
 import os
 from packaging import version
 
+
 # import pygame
 
 
 class ScenarioRecorder:
-    def __init__(self, 
+    def __init__(self,
                  world: carla.World,
                  cam_tf: carla.Transform,
                  save_floder_path,
                  resolution=(832, 468),
-                 frame_rate=24.0,):
+                 frame_rate=24.0, ):
         """
         Initializes the ScenarioRecorder class to record scenarios in the CARLA simulator.
 
@@ -26,12 +27,12 @@ class ScenarioRecorder:
         - ego_vehicle (carla.Vehicle): The vehicle being controlled or observed in the simulation.
         - save_folder_path (str): Directory path for saving the recordings.
         - resolution (tuple): Image resolution for recording, default (832,468). Choose from
-            [   320x180,    384x216, 
-                448x252,    512x288, 
-                576x324,    640x360, 
-                704x396,    768x432, 
-                832x468,    896x504, 
-                960x540,    1024x576    
+            [   320x180,    384x216,
+                448x252,    512x288,
+                576x324,    640x360,
+                704x396,    768x432,
+                832x468,    896x504,
+                960x540,    1024x576
                 and those larger then 1280x720
             ].
         - frame_rate (float): Recording frame rate in frames per second, default 24.0.

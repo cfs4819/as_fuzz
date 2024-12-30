@@ -9,17 +9,17 @@ from MS_fuzz.ga_engine.gene import GeneNpcWalkerList, GeneNpcVehicleList
 
 
 class Evaluate_Transfer:
-    def __init__(self, uid:str,
+    def __init__(self, uid: str,
                  id,
                  walker_ind: GeneNpcWalkerList,
                  vehicle_ind: GeneNpcVehicleList,
                  is_evaluated,
                  is_in_queue):
-        self.uid: str = uid # for transfer between processes
+        self.uid: str = uid  # for transfer between processes
         self.id = id
         self.walker_ind: GeneNpcWalkerList = walker_ind
         self.vehicle_ind: GeneNpcVehicleList = vehicle_ind
-        
+
         self.is_evaluated = is_evaluated
         self.is_in_queue = is_in_queue
 
@@ -71,7 +71,6 @@ class Evaluate_Object:
         # frame_end = self.frame_recorded[-1]['frame']
         # frame_duration = frame_end - frame_start + 1
         if not self.frame_recorded or len(self.frame_recorded) == 0:
-
             self.walker_ind.fitness.values = (0, 0, 0, 0)
             self.vehicle_ind.fitness.values = (0, 0, 0, 0)
             self.is_evaluated = False
@@ -104,7 +103,7 @@ class Evaluate_Object:
         self.f_smooth = f_unsmooth_acc
         self.f_crossing_time = walker_in_road_count / len(self.frame_recorded)
         self.f_interaction_rate = vehicle_may_collide / \
-            len(self.frame_recorded)
+                                  len(self.frame_recorded)
 
         self.walker_ind.fitness.values = (self.f_distance,
                                           self.f_smooth,
@@ -138,26 +137,26 @@ class Evaluate_Object:
             # Update positions
             future_pos1 = carla.Location(
                 x=position1.x + (velocity1.x * t) + 0.5
-                * acceleration1.x * t**2,
+                  * acceleration1.x * t ** 2,
                 y=position1.y + (velocity1.y * t) + 0.5
-                * acceleration1.y * t**2,
+                  * acceleration1.y * t ** 2,
                 z=position1.z + (velocity1.z * t) + 0.5
-                * acceleration1.z * t**2
+                  * acceleration1.z * t ** 2
             )
 
             future_pos2 = carla.Location(
                 x=position2.x + (velocity2.x * t) + 0.5
-                * acceleration2.x * t**2,
+                  * acceleration2.x * t ** 2,
                 y=position2.y + (velocity2.y * t) + 0.5
-                * acceleration2.y * t**2,
+                  * acceleration2.y * t ** 2,
                 z=position2.z + (velocity2.z * t) + 0.5
-                * acceleration2.z * t**2
+                  * acceleration2.z * t ** 2
             )
 
             # Calculate distance between future positions
-            dist = math.sqrt((future_pos1.x - future_pos2.x)**2
-                             + (future_pos1.y - future_pos2.y)**2
-                             + (future_pos1.z - future_pos2.z)**2)
+            dist = math.sqrt((future_pos1.x - future_pos2.x) ** 2
+                             + (future_pos1.y - future_pos2.y) ** 2
+                             + (future_pos1.z - future_pos2.z) ** 2)
 
             # Check for potential collision
             if dist < collision_distance:

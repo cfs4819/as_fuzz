@@ -178,7 +178,7 @@ class UnsafeDetector(object):
     def lane_occupation_timer(self, road_id, section_id, stop_event: Event):
         start_time = time.time()
 
-        while not stop_event.is_set() :
+        while not stop_event.is_set():
             '''debug'''
             # bounding_box = self.vehicle.bounding_box
             # vehicle_transform = self.vehicle.get_transform()
@@ -220,7 +220,7 @@ class UnsafeDetector(object):
                 for uid, (thread, stop_event) in self.active_timers.items():
                     stop_event.set()  # Signal the event to stop the thread
                     if thread.is_alive():
-                        thread.join() #  Wait for the thread to finish
+                        thread.join()  # Wait for the thread to finish
                 self.active_timers.clear()
 
             if self.lane_change_detector:
@@ -261,12 +261,14 @@ if __name__ == '__main__':
 
     decector = UnsafeDetector(world, ego_vehicle)
 
+
     def callback(type, message, data):
         if type == UNSAFE_TYPE.ACCELERATION:
             # print(f'{message}\r', end=' ')
             pass
         else:
             print(message)
+
 
     decector.register_callback(callback)
     decector.init_sensors()

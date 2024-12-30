@@ -127,26 +127,26 @@ def predict_collision(actor1: carla.ActorSnapshot,
         # Update positions
         future_pos1 = carla.Location(
             x=position1.x + (velocity1.x * t) + 0.5
-            * acceleration1.x * t**2,
+              * acceleration1.x * t ** 2,
             y=position1.y + (velocity1.y * t) + 0.5
-            * acceleration1.y * t**2,
+              * acceleration1.y * t ** 2,
             z=position1.z + (velocity1.z * t) + 0.5
-            * acceleration1.z * t**2
+              * acceleration1.z * t ** 2
         )
 
         future_pos2 = carla.Location(
             x=position2.x + (velocity2.x * t) + 0.5
-            * acceleration2.x * t**2,
+              * acceleration2.x * t ** 2,
             y=position2.y + (velocity2.y * t) + 0.5
-            * acceleration2.y * t**2,
+              * acceleration2.y * t ** 2,
             z=position2.z + (velocity2.z * t) + 0.5
-            * acceleration2.z * t**2
+              * acceleration2.z * t ** 2
         )
 
         # Calculate distance between future positions
-        dist = math.sqrt((future_pos1.x - future_pos2.x)**2
-                         + (future_pos1.y - future_pos2.y)**2
-                         + (future_pos1.z - future_pos2.z)**2)
+        dist = math.sqrt((future_pos1.x - future_pos2.x) ** 2
+                         + (future_pos1.y - future_pos2.y) ** 2
+                         + (future_pos1.z - future_pos2.z) ** 2)
 
         # Check for potential collision
         if dist < collision_distance:

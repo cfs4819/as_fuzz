@@ -5,7 +5,6 @@ import json
 import queue
 from typing import Dict, List
 
-
 from multiprocessing import Process, Queue
 from MS_fuzz.common.evaluate import Evaluate_Object, Evaluate_Transfer
 from MS_fuzz.ga_engine.cega import CEGA
@@ -147,7 +146,7 @@ class GA_LIB():
         if not os.path.isfile(file_path):
             self.logger.error(f'Missing required file: {required_files}')
             return False
-         # Check the paths inside cega_lib.json
+        # Check the paths inside cega_lib.json
         lib_path = os.path.join(self.ga_lib_floder_path, 'cega_lib.json')
         try:
             with open(lib_path, 'r') as f:
@@ -210,7 +209,7 @@ class GA_LIB():
                     self.eva_res_list[res_id] = obj_2_evaluate
                 elif cmd == 'feedback':
                     print('get a feedback')
-                    eva_obj:Evaluate_Transfer = req_dic.get('eva_obj')
+                    eva_obj: Evaluate_Transfer = req_dic.get('eva_obj')
                     res_id = eva_obj.uid
                     target_eva_obj = self.eva_res_list.get(res_id)
                     target_eva_obj.walker_ind.fitness.values = eva_obj.walker_ind.fitness.values
@@ -222,5 +221,5 @@ class GA_LIB():
             except KeyboardInterrupt:
                 break
             except Exception as e:
-                print('[Ga_lib]',e)
+                print('[Ga_lib]', e)
                 continue

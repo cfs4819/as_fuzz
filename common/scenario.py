@@ -29,7 +29,6 @@ class NpcBase(object):
                  blueprint: carla.ActorBlueprint,
                  start_time,
                  free_roam=False):
-
         self.start_loc: carla.Transform = start_loc
         self.end_loc: carla.Transform = end_loc
         self.blueprint: carla.ActorBlueprint = blueprint
@@ -95,7 +94,6 @@ class NpcWalker(NpcBase):
 
 
 class LocalScenario(object):
-
     '''
         # Run as follow step:
             1. add npcs into npc list by `add_npc_vehicle()` or `add_npc_walker()`
@@ -111,7 +109,7 @@ class LocalScenario(object):
     def __init__(self,
                  carla_world: carla.World,
                  ego_vhicle: carla.Vehicle,
-                 logger=logger,carla_map = None):
+                 logger=logger, carla_map=None):
         self.id = ''
         self.scen_seg: Segment = None
         self.logger = logger
@@ -257,7 +255,7 @@ class LocalScenario(object):
                            y=start_loc['y'], z=start_loc['z']),
             project_to_road=True,
             lane_type=(carla.LaneType.Driving if behavior_type ==
-                       0 else carla.LaneType.Shoulder)
+                                                 0 else carla.LaneType.Shoulder)
         )
 
         start_waypoint_tf = start_waypoint.transform
@@ -458,7 +456,7 @@ class LocalScenario(object):
             vehicle.close_event = threading.Event()
             vehicle.control_thread = threading.Thread(
                 target=self.vehicle_control_handler,
-                args=(vehicle, ),
+                args=(vehicle,),
                 name=f"thread_{vehicle.vehicle_id}")
             vehicle.control_thread.start()
         for walker in self.npc_walker_list:
@@ -467,13 +465,13 @@ class LocalScenario(object):
             walker.close_event = threading.Event()
             walker.control_thread = threading.Thread(
                 target=self.walker_control_handler,
-                args=(walker, ),
+                args=(walker,),
                 name=f"thread_{walker.walker_id}")
             walker.control_thread.start()
 
         self.running = True
 
-    def scenario_end(self)->Evaluate_Object:
+    def scenario_end(self) -> Evaluate_Object:
         self.remove_all_npcs()
         if self.evaluate_obj:
             self.evaluate_obj.evaluate()
@@ -491,11 +489,11 @@ class LocalScenario(object):
                 # 1. wait until vehicle can run
                 if (not vehicle.is_running and
                     not vehicle.close_event.is_set()
-                    ):
+                ):
                     # Check if it's time for this vehicle to run
                     curr_time = self.carla_world.get_snapshot().timestamp
                     time_passed = curr_time.elapsed_seconds - \
-                        self.scenario_start_time.elapsed_seconds
+                                  self.scenario_start_time.elapsed_seconds
                     if time_passed >= vehicle.start_time:
                         if vehicle.behavior_type == 0:
                             forward_vector = vehicle.vehicle.get_transform().rotation.get_forward_vector()
@@ -541,7 +539,7 @@ class LocalScenario(object):
                     # Check if it's time for this walker to run
                     curr_time = self.carla_world.get_snapshot().timestamp
                     time_passed = curr_time.elapsed_seconds - \
-                        self.scenario_start_time.elapsed_seconds
+                                  self.scenario_start_time.elapsed_seconds
                     if time_passed < walker.start_time:
                         continue
                     # is time that this walker can run

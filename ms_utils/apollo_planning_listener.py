@@ -16,8 +16,8 @@ class PlanningListener:
         self.stop_signal = False
         self.main_thread = None
 
-        self.stop_reason = None  
-        self.stop_reason_lock = threading.Lock()  
+        self.stop_reason = None
+        self.stop_reason_lock = threading.Lock()
 
     def start(self):
         self.main_thread = threading.Thread(target=self.run)
@@ -49,13 +49,13 @@ class PlanningListener:
             self.plan_points = new_plan_points
 
         self.update_debug_drawings()
-        self.extract_stop_reason(planning_data)  
+        self.extract_stop_reason(planning_data)
 
     def extract_stop_reason(self, planning_data: planning_pb2.ADCTrajectory):
         """Extract stop reason from planning data."""
         stop_decision = planning_data.decision.main_decision.stop
-        stop_reason_code = stop_decision.reason_code  
-        stop_reason_description = stop_decision.reason  
+        stop_reason_code = stop_decision.reason_code
+        stop_reason_description = stop_decision.reason
 
         with self.stop_reason_lock:
             self.stop_reason = {
@@ -85,7 +85,7 @@ if __name__ == "__main__":
     client = carla.Client('172.17.0.1', 5000)
     world = client.get_world()
 
-    logger = None  
+    logger = None
     planning_listener = PlanningListener(world, logger)
     planning_listener.start()
 

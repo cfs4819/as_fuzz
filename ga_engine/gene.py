@@ -7,24 +7,24 @@ from typing import List
 
 class GeneNpcWalker:
     def __init__(self):
-        self.start: dict = {'x': 0, 'y': 0, 'z': 0}    # "x": 0.0, "y": 0.0
-        self.end: dict = {'x': 0, 'y': 0, 'z': 0}      # "x": 0.0, "y": 0.0
+        self.start: dict = {'x': 0, 'y': 0, 'z': 0}  # "x": 0.0, "y": 0.0
+        self.end: dict = {'x': 0, 'y': 0, 'z': 0}  # "x": 0.0, "y": 0.0
         self.start_time: float = 0.0
         self.max_speed: float = 1.4
-        self.status: int = 0     # 0: walking, 1: stopped
+        self.status: int = 0  # 0: walking, 1: stopped
 
 
 class GeneNpcVehicle:
     def __init__(self):
-        self.start: dict = {'x': 0, 'y': 0, 'z': 0}    # "x": 0.0, "y": 0.0
-        self.end: dict = {'x': 0, 'y': 0, 'z': 0}      # "x": 0.0, "y": 0.0
+        self.start: dict = {'x': 0, 'y': 0, 'z': 0}  # "x": 0.0, "y": 0.0
+        self.end: dict = {'x': 0, 'y': 0, 'z': 0}  # "x": 0.0, "y": 0.0
         self.start_time: float = 0.0
 
         self.vehicle_type: int = 0
         # 0: Car, 1: Truck, 2: Van, 3: Motorcycle, 4: Bicycle.
 
         self.initial_speed: float = 0.0
-        self.status: int = 0     # 0: driving, 1: starting, 2: parked.
+        self.status: int = 0  # 0: driving, 1: starting, 2: parked.
         self.agent_type: int = 0  # 0: normal, 1: cautious, 2: aggressive.
         # self.max_speed:float = 10.0
         # self.status:int = 0     # 0: walking, 1: stopped
@@ -64,10 +64,10 @@ class GeneNpcWalkerList:
 
     def get_a_new_agent(self, scene_width=30, scene_length=30) -> GeneNpcWalker:
         # generate a random start position and end position
-        start_x = random.uniform(-scene_length/2, scene_length/2)
-        start_y = random.uniform(-scene_width/2, scene_width/2)
-        end_x = random.uniform(-scene_length/2, scene_length/2*3)
-        end_y = random.uniform(-scene_width/2, scene_width/2)
+        start_x = random.uniform(-scene_length / 2, scene_length / 2)
+        start_y = random.uniform(-scene_width / 2, scene_width / 2)
+        end_x = random.uniform(-scene_length / 2, scene_length / 2 * 3)
+        end_y = random.uniform(-scene_width / 2, scene_width / 2)
 
         new_walker = GeneNpcWalker()
         new_walker.start = {'x': start_x, 'y': start_y, 'z': 0}
@@ -94,12 +94,12 @@ class GeneNpcVehicleList:
 
     def get_a_new_agent(self, scene_width=30, scene_length=30) -> GeneNpcVehicle:
         # generate a random start position and end position
-        start_x = random.uniform(-scene_length/2, scene_length/2)
-        start_y = random.uniform(-scene_width/2, scene_width/2)
-        end_x = random.uniform(-scene_length/2, scene_length/2*3)
-        end_y = random.uniform(-scene_width/2, scene_width/2)
+        start_x = random.uniform(-scene_length / 2, scene_length / 2)
+        start_y = random.uniform(-scene_width / 2, scene_width / 2)
+        end_x = random.uniform(-scene_length / 2, scene_length / 2 * 3)
+        end_y = random.uniform(-scene_width / 2, scene_width / 2)
         while abs(start_y - end_y) <= 5:
-            end_y = random.uniform(-scene_width/2, scene_width/2)
+            end_y = random.uniform(-scene_width / 2, scene_width / 2)
 
         new_vehicle = GeneNpcVehicle()
 
@@ -122,7 +122,7 @@ class GeneNpcVehicleList:
         return new_vehicle
 
 
-def get_new_walker_ind(max_count:int=5) -> GeneNpcWalkerList:
+def get_new_walker_ind(max_count: int = 5) -> GeneNpcWalkerList:
     ind = GeneNpcWalkerList(max_count=max_count)
     ind.list = []
     if max_count <= 1:
@@ -133,7 +133,7 @@ def get_new_walker_ind(max_count:int=5) -> GeneNpcWalkerList:
     return ind
 
 
-def get_new_vehicle_ind(max_count:int=5) -> GeneNpcVehicleList:
+def get_new_vehicle_ind(max_count: int = 5) -> GeneNpcVehicleList:
     ind = GeneNpcVehicleList(max_count=max_count)
     ind.list = []
     if max_count <= 1:

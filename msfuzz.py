@@ -29,7 +29,7 @@ def set_args():
     argument_parser.add_argument("-p", "--sim-port", default=4000, type=int,
                                  help="RPC port of Carla simulation server")
     argument_parser.add_argument("--town", default=10, type=int,
-                           help="Test on a specific town (e.g., '--town 3' forces Town03)")
+                                 help="Test on a specific town (e.g., '--town 3' forces Town03)")
     return argument_parser
 
 
@@ -122,6 +122,7 @@ class MS_FUZZ(object):
             logger.warning("GA_LIB Process SIGINT received. Saving...")
             self.ga_lib.close_and_save()
             os.kill(os.getpid(), signal.SIGKILL)
+
         signal.signal(signal.SIGINT, sigint_handler)
 
         self.ga_lib.continue_ga()
@@ -142,6 +143,7 @@ class MS_FUZZ(object):
                         'Simulator Process stop signal received. Closing...')
                     sim.close()
                     return
+
         terminate_listener_t = threading.Thread(
             target=terminate_listener_handler)
         terminate_listener_t.start()
@@ -149,6 +151,7 @@ class MS_FUZZ(object):
         def close_handler(signal_received, frame):
             logger.warning("Simulator Process SIGINT received. Closing...")
             sim.close()
+
         signal.signal(signal.SIGINT, close_handler)
 
         sim.initialization()

@@ -5,15 +5,17 @@ import shutil
 from loguru import logger
 from MS_fuzz.common.simulator import Simulator
 
+
 def clear_and_create(folder_path):
     if os.path.exists(folder_path):
         shutil.rmtree(folder_path)
     os.makedirs(folder_path)
 
+
 class Runner(object):
 
-    def __init__(self, output_path, simulator:Simulator):
-        
+    def __init__(self, output_path, simulator: Simulator):
+
         self.global_id = 0
 
         self.SCENARIO_FOLDER = 'scenarios'
@@ -26,10 +28,10 @@ class Runner(object):
 
         clear_and_create(self.scenario_path)
         clear_and_create(self.record_carla_path)
-        clear_and_create(self.record_apollo_path) # self.record_path
+        clear_and_create(self.record_apollo_path)  # self.record_path
 
-        self.sim = simulator # save record to records/scenario_name/scenario_id
-        
+        self.sim = simulator  # save record to records/scenario_name/scenario_id
+
         self.runner_log = os.path.join(output_path, 'logs/runner.log')
         if os.path.exists(self.runner_log):
             os.remove(self.runner_log)

@@ -13,7 +13,7 @@ class ResultSaver(object):
     def __init__(self, save_floder_path=''):
 
         self.result_to_save = {}
-        
+
         self.frames_record = []
         '''
             frame_record = {
@@ -26,14 +26,14 @@ class ResultSaver(object):
                 'ego_ss': ego_ss:carla.ActorSnapshot
             }
         '''
-        
+
         self.sce_result_path = save_floder_path
-        
+
         self.clear_result()
 
     def set_save_path(self, save_floder_path):
         self.sce_result_path = save_floder_path
-        
+
     def clear_result(self):
         self.result_to_save = {}
         self.result_to_save = {
@@ -50,22 +50,22 @@ class ResultSaver(object):
             'video_path': None,
             'Odometer': None,
         }
-        
+
         self.frames_record = []
-    
+
     def add_frame(self, frame: dict):
         self.frames_record.append(frame)
-        
+
     def add_minor_unsafe(self,
-                          unsafe_type: UNSAFE_TYPE,
-                          data,
-                          trigger_time):
+                         unsafe_type: UNSAFE_TYPE,
+                         data,
+                         trigger_time):
         time_pass = trigger_time - self.result_to_save['start_time']
         time_pass_str = str(timedelta(seconds=time_pass))
 
         if unsafe_type == UNSAFE_TYPE.ACCELERATION:
             if self.result_to_save['minor_unsafe'] and \
-                    'unsafe_acc' in self.result_to_save['minor_unsafe']:
+                'unsafe_acc' in self.result_to_save['minor_unsafe']:
                 if data == self.result_to_save['minor_unsafe']['unsafe_acc'][-1]['acc']:
                     return
                 self.result_to_save['minor_unsafe']['unsafe_acc'].append({
@@ -74,7 +74,7 @@ class ResultSaver(object):
                     'acc': data
                 })
             elif self.result_to_save['minor_unsafe'] and \
-                    'unsafe_acc' not in self.result_to_save['minor_unsafe']:
+                'unsafe_acc' not in self.result_to_save['minor_unsafe']:
                 self.result_to_save['minor_unsafe']['unsafe_acc'] = [{
                     'time': time_pass,
                     'time_str': time_pass_str,
@@ -91,13 +91,13 @@ class ResultSaver(object):
 
         elif unsafe_type == UNSAFE_TYPE.LANE_CHANGE:
             if self.result_to_save['minor_unsafe'] and \
-                    'lanechange_timeout' in self.result_to_save['minor_unsafe']:
+                'lanechange_timeout' in self.result_to_save['minor_unsafe']:
                 self.result_to_save['minor_unsafe']['lanechange_timeout'].append({
                     'time': time_pass,
                     'time_str': time_pass_str
                 })
             elif self.result_to_save['minor_unsafe'] and \
-                    'lanechange_timeout' not in self.result_to_save['minor_unsafe']:
+                'lanechange_timeout' not in self.result_to_save['minor_unsafe']:
                 self.result_to_save['minor_unsafe']['lanechange_timeout'] = [{
                     'time': time_pass,
                     'time_str': time_pass_str
@@ -117,14 +117,14 @@ class ResultSaver(object):
             if data == 2:
                 lane_type_str = 'Solid Solid Lane'
             if self.result_to_save['minor_unsafe'] and \
-                    'crossing_solid_lane' in self.result_to_save['minor_unsafe']:
+                'crossing_solid_lane' in self.result_to_save['minor_unsafe']:
                 self.result_to_save['minor_unsafe']['crossing_solid_lane'].append({
                     'time': time_pass,
                     'time_str': time_pass_str,
                     'crossing': lane_type_str
                 })
             elif self.result_to_save['minor_unsafe'] and \
-                    'crossing_solid_lane' not in self.result_to_save['minor_unsafe']:
+                'crossing_solid_lane' not in self.result_to_save['minor_unsafe']:
                 self.result_to_save['minor_unsafe']['crossing_solid_lane'] = [{
                     'time': time_pass,
                     'time_str': time_pass_str,
@@ -139,7 +139,7 @@ class ResultSaver(object):
                     }]
                 }
 
-    def save_result(self, ego_curr_loc:carla.Location, save_video=True):
+    def save_result(self, ego_curr_loc: carla.Location, save_video=True):
         self.result_to_save['end_loc'] = {
             'x': ego_curr_loc.x,
             'y': ego_curr_loc.y,
@@ -149,7 +149,7 @@ class ResultSaver(object):
         now = time.time()
         self.result_to_save['end_time'] = now
         self.result_to_save['run_time'] = now - \
-            self.result_to_save['start_time']
+                                          self.result_to_save['start_time']
 
         if not self.frames_record or len(self.frames_record) == 0:
             self.result_to_save['interaction'] = None
@@ -207,13 +207,13 @@ class ResultSaver(object):
 
                 will_collide_frame_cnt += 1 if this_frame_has_colli else 0
                 will_collide_rate = pre_colli_cunt / \
-                    len(npcs_ss) if npcs_ss else 0
+                                    len(npcs_ss) if npcs_ss else 0
 
                 interaction_per_frame.append({
                     'timestamp': frame['timestamp'],
                     'frame_num': frame['frame'],
                     'interaction_rate': will_collide_rate,
-                    'npcs_pos':npcs_pos
+                    'npcs_pos': npcs_pos
                 })
 
                 pre_frame = frame
