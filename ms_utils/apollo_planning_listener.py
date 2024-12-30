@@ -6,7 +6,7 @@ from modules.common_msgs.planning_msgs import planning_pb2
 import carla
 
 
-class PlanningListener:
+class PlanningListener: 
     def __init__(self, carla_world, logger):
         self.world = carla_world
         self.plan_points = []
