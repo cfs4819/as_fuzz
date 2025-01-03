@@ -5,6 +5,7 @@ import time
 import threading
 import signal
 import pdb
+import logging
 import xml.etree.ElementTree as ET
 
 from MS_fuzz.ms_utils.apollo_routing_listener import ApolloRoutingListener
@@ -109,6 +110,7 @@ class SceneSegment(object):
 
     def listening_thread(self):
         last_in_index = self.curr_seg_index - 1
+        logging.info('start seg listening')
         while not self.stop_vehicle_pos_listening:
             pos = self.ego_vehicle.get_location()
 

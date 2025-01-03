@@ -27,6 +27,7 @@ from MS_fuzz.common.unsafe_detector import UNSAFE_TYPE, UnsafeDetector
 from MS_fuzz.common.evaluate import Evaluate_Object, Evaluate_Transfer
 from MS_fuzz.ga_engine.scene_segmentation import SceneSegment
 from MS_fuzz.common.result_saver import ResultSaver
+from MS_fuzz.planning.is_stuck import RoadBlockageChecker
 
 import pdb
 
@@ -109,6 +110,7 @@ class Simulator(object):
         self.recorder: ScenarioRecorder = None
         self.unsafe_detector: UnsafeDetector = None
         self.result_saver: ResultSaver = ResultSaver()
+        self.road_blockage_Checker: RoadBlockageChecker = None
         self.is_recording = False
 
         self.on_unsafe_lock = False
@@ -617,7 +619,9 @@ class Simulator(object):
         self.carla_world.set_pedestrians_cross_factor(0.1)
         logger.info('waitting until the vehicle reach the first segment')
         # wait until the vehicle reach first segment
-        while (self.scene_segmentation.curr_seg_index < 0):
+        while self.scene_segmentation.curr_seg_index < 0:
+            # logger.info('scene_segmentation.curr_seg_index: '
+            #             + str(self.scene_segmentation.curr_seg_index))
             if self.close_event.is_set():
                 return
             self.carla_world.wait_for_tick()
