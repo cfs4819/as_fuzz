@@ -7,7 +7,7 @@ import math
 import os
 import sys
 
-from planing.Env import Env
+from planning.Env import Env
 
 
 def set_carla_api_path():
@@ -34,7 +34,7 @@ except ModuleNotFoundError as e:
     exit(-1)
 import time
 
-from planing.RTAAStar import RTAAStar
+from planning.RTAAStar import RTAAStar
 
 
 def main():

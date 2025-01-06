@@ -1,7 +1,11 @@
+from typing import Dict
+
 import carla
 import time
 # from enum import Enum
 from threading import Thread, Lock, Event
+
+from planning.is_stuck import RoadBlockageChecker
 
 
 class UNSAFE_TYPE():
@@ -29,6 +33,13 @@ class UnsafeDetector(object):
         self.imu_sensor = None  # Add IMU sensor attribute
         self.callbacks = []
 
+        # Road blockage detection attributes
+        self.road_blockage_event = Event()
+        self.road_blockage_thread = None
+        # Road blockage checker
+        self.road_blockage_checker = RoadBlockageChecker(self.map, world)
+        self.distance_threshold = 5.0  # Example threshold for road blockage
+
         self.active_timers = {}
         self.timers_lock = Lock()
         self.threshold_time = 5.0
@@ -42,6 +53,13 @@ class UnsafeDetector(object):
 
     def register_callback(self, callback):
         self.callbacks.append(callback)
+
+    def is_road_blocked(self) -> Dict:
+        """
+        Checks if any road is blocked based on the current state of the world.
+        :return: Dictionary containing blockage status and details.
+        """
+        return self.road_blockage_checker.is_road_blocked()
 
     def init_sensors(self):
         # Setup the lane invasion and collision sensors
@@ -67,6 +85,8 @@ class UnsafeDetector(object):
         self.imu_sensor.listen(self.on_imu_data)  # Add IMU data listener
 
         self.start_stuck_monitor(self.stuck_timeout)
+        # stop for test
+        # self.start_road_blockage_monitor()
 
     def stop_detection(self):
         """Stops the detection of unsafe situations."""
@@ -74,6 +94,7 @@ class UnsafeDetector(object):
         self.collision_detector.stop()
         self.imu_sensor.stop()  # Stop IMU sensor
         self.stop_stuck_monitor()
+        self.stop_road_blockage_monitor()
 
     def start_stuck_monitor(self, timeout=60):
         """Starts a thread to monitor if the vehicle is stuck based on its velocity."""
@@ -110,6 +131,36 @@ class UnsafeDetector(object):
             self.stuck_event.set()
         if self.stuck_thread:
             self.stuck_thread.join()
+
+    def start_road_blockage_monitor(self):
+        """Starts a thread to monitor road blockage."""
+        if self.road_blockage_thread and self.road_blockage_thread.is_alive():
+            return  # Avoid restarting an already running thread
+
+        self.road_blockage_event.clear()
+        self.road_blockage_thread = Thread(target=self.monitor_road_blockage)
+        self.road_blockage_thread.start()
+
+    def stop_road_blockage_monitor(self):
+        """Stops the road blockage monitoring thread."""
+        if self.road_blockage_event:
+            self.road_blockage_event.set()
+        if self.road_blockage_thread:
+            self.road_blockage_thread.join()
+
+    def monitor_road_blockage(self):
+        """Thread for monitoring road blockage."""
+        while not self.road_blockage_event.is_set():
+            # Implement road blockage detection
+            road_blockage_result = self.is_road_blocked()
+            if road_blockage_result["blocked"]:
+                self.trigger_callbacks(
+                    UNSAFE_TYPE.STUCK,  # Or another suitable type
+                    f"Road {road_blockage_result['blocked_road_id']} is blocked.",
+                    road_blockage_result["vehicles_on_blocked_road"]
+                )
+            time.sleep(1)  # Perform check every second
+
 
     def on_collision(self, event):
         # Handle collision events

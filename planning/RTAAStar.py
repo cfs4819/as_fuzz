@@ -5,7 +5,7 @@ Modified for Carla Simulator Integration
 
 import math
 import heapq
-from planing.Env import Env
+from planning.Env import Env
 
 
 class QueuePrior:

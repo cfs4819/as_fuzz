@@ -1,6 +1,9 @@
 import collections
+import math
+import random
 import sys
 import time
+from typing import List, Dict
 
 
 def set_carla_api_path():
@@ -16,9 +19,35 @@ def set_carla_api_path():
         sys.path.append(api_path)
         print(f"API: {api_path}")
 
+
 set_carla_api_path()
 import carla
-from typing import List, Dict
+
+
+def is_vehicle_in_front(ego_vehicle, other_vehicle, distance_threshold=30.0) -> bool:
+    """
+    Determines if another vehicle is in front of the ego vehicle.
+
+    :param ego_vehicle: Carla ego vehicle actor.
+    :param other_vehicle: Carla other vehicle actor.
+    :param distance_threshold: Max distance to consider the vehicle as 'in front'.
+    :return: True if the other vehicle is in front, False otherwise.
+    """
+    ego_transform = ego_vehicle.get_transform()
+    other_transform = other_vehicle.get_transform()
+
+    # Calculate the relative position vector
+    ego_location = ego_transform.location
+    other_location = other_transform.location
+    relative_position = other_location - ego_location
+
+    # Compute the dot product of relative position and ego vehicle's forward vector
+    forward_vector = ego_transform.get_forward_vector()
+    dot_product = forward_vector.x * relative_position.x + forward_vector.y * relative_position.y
+
+    # Check if the other vehicle is within the distance threshold and in front
+    distance = math.sqrt(relative_position.x ** 2 + relative_position.y ** 2)
+    return dot_product > 0 and distance <= distance_threshold
 
 
 class RoadBlockageChecker:
@@ -55,7 +84,7 @@ class RoadBlockageChecker:
         """
         Computes the distance of the vehicle from the start of the lane.
         :param vehicle: CARLA vehicle actor
-        :return: Distance from the start of the lane in meters
+        :return:  Distanced from the start of the lane in meters
         """
         vehicle_location = vehicle.get_location()
         waypoint = self.carla_map.get_waypoint(vehicle_location, project_to_road=True, lane_type=carla.LaneType.Driving)
@@ -113,7 +142,6 @@ class RoadBlockageChecker:
         # Traverse left lanes
         traverse_lanes(waypoint.get_left_lane(), lambda: waypoint.get_left_lane())
 
-        print(f"[DEBUG] Extracted lane IDs for road {road_id}: {sorted(lane_ids)}")
         return sorted(lane_ids)
 
     def is_road_blocked(self, vehicles: List[carla.Actor], distance_threshold: float) -> Dict:
@@ -177,12 +205,78 @@ class RoadBlockageChecker:
                     result["blocked_road_id"] = road_id
                     result["vehicles_on_blocked_road"] = [v["vehicle"] for v in vehicle_data]
                     return result
-
         return result
+
+    def is_vehicle_accelerating(self, vehicle: carla.Vehicle) -> bool:
+        """
+        Checks if the vehicle is currently accelerating.
+        """
+        control = vehicle.get_control()
+        return control.throttle > 0.1 and control.brake == 0.0
+
+    def resolve_stuck_vehicles(self, vehicles: List[carla.Actor], condition_func, throttle: float = 0.5,
+                               duration: float = 3.0):
+        """
+        Abstract function to resolve stuck vehicles based on a given condition.
+
+        :param vehicles: List of vehicle actors to evaluate.
+        :param condition_func: A function that takes a vehicle as input and returns True if the vehicle should be resolved.
+        :param throttle: Throttle value to apply to stuck vehicles (default: 0.5).
+        :param duration: Duration to apply the throttle (in seconds, default: 3.0).
+        """
+        # Filter vehicles based on the condition
+        target_vehicles = [vehicle for vehicle in vehicles if condition_func(vehicle)]
+
+        if not target_vehicles:
+            return
+
+        # Randomly choose one vehicle from the filtered list
+        vehicle_to_resolve = random.choice(target_vehicles)
+
+        print(f"[ACTION] Resolving stuck vehicle: Vehicle ID {vehicle_to_resolve.id}")
+        vehicle_to_resolve.apply_control(carla.VehicleControl(throttle=throttle, brake=0.0))
+
+        time.sleep(duration)
+
+        print(f"[ACTION] Resetting control for vehicle ID: {vehicle_to_resolve.id}")
+        vehicle_to_resolve.apply_control(carla.VehicleControl(throttle=0.0, brake=0.0))
+
+    def solve_blockage(self, ego_vehicle: carla.Vehicle, throttle: float = 0.5, duration: float = 3.0):
+        """
+        Solves blockage by applying throttle to vehicles in front of the ego vehicle.
+        """
+
+        # Check if the road is blocked
+        slow_vehicles = [
+            actor for actor in self.carla_world.get_actors()
+            if "vehicle" in actor.type_id and actor.get_velocity().length() < 0.5
+        ]
+
+        def condition(vehicle):
+            # Vehicle is in front of ego and not accelerating
+            return is_vehicle_in_front(ego_vehicle,
+                                       vehicle) and vehicle.get_velocity().length() < 1.0 and not self.is_vehicle_accelerating(
+                vehicle)
+
+        self.resolve_stuck_vehicles(slow_vehicles, condition, throttle, duration)
+
+    def resolve_intersection_stuck(self, vehicles: List[carla.Actor], throttle: float = 0.5, duration: float = 3.0):
+        """
+        Resolves vehicles stuck at intersections by applying throttle to vehicles
+        stopped for too long and with no vehicles in front.
+        """
+
+        def condition(vehicle):
+            # Vehicle is stopped and no vehicles are in front
+            speed = vehicle.get_velocity().length()
+            is_in_front = any(is_vehicle_in_front(vehicle, other_vehicle) for other_vehicle in vehicles if
+                              other_vehicle.id != vehicle.id)
+            return speed < 0.5 and not is_in_front
+
+        self.resolve_stuck_vehicles(vehicles, condition, throttle, duration)
 
 
 if __name__ == '__main__':
-    import time
 
     # Example usage
     client = carla.Client('localhost', 4000)
@@ -190,11 +284,25 @@ if __name__ == '__main__':
     world = client.get_world()
     carla_map = world.get_map()
 
+    # Retrieve the Tesla Model 3 as the ego vehicle
+    ego_vehicle = None
+
+    for vehicle in world.get_actors().filter('vehicle.*'):
+        print(vehicle.type_id)
+        if "vehicle.lincoln.mkz_2017" in vehicle.type_id:
+            ego_vehicle = vehicle
+            break
+
+    if not ego_vehicle:
+        print("[ERROR] No vehicle.lincoln.mkz_2017 found as ego vehicle.")
+        exit(1)
+
+    print(f"[INFO] Ego vehicle (Tesla Model 3) found with ID: {ego_vehicle.id}")
+
     # Initialize the RoadBlockageChecker
     checker = RoadBlockageChecker(carla_map, world)
 
     distance_threshold = 5.0  # Define the distance threshold for neighboring vehicles
-
     try:
         while True:
             # Retrieve background vehicles with speed < 0.5
@@ -202,18 +310,16 @@ if __name__ == '__main__':
                 actor for actor in world.get_actors()
                 if "vehicle" in actor.type_id and actor.get_velocity().length() < 0.5
             ]
-            print(f"[INFO] Found {len(slow_vehicles)} vehicles with speed < 0.5.")
 
-            # Check if the road is blocked using slow vehicles
-            result = checker.is_road_blocked(slow_vehicles, distance_threshold)
-            if result["blocked"]:
-                print(f"[RESULT] Road is blocked on road ID {result['blocked_road_id']} "
-                      f"with {len(result['vehicles_on_blocked_road'])} vehicles.")
-            else:
-                print("[RESULT] No roads are blocked.")
+            # Solve blockage in front of ego vehicle
+            blockage_result = checker.is_road_blocked(slow_vehicles, distance_threshold=5.0)
+            if blockage_result:
+                checker.solve_blockage(ego_vehicle, throttle=1.0, duration=3.0)
+
+            # Resolve vehicles stuck at intersections
+            checker.resolve_intersection_stuck(slow_vehicles, throttle=1.0, duration=3.0)
 
             # Wait for 1 second before the next check
             time.sleep(1)
     except KeyboardInterrupt:
         print("[INFO] Stopping the road blockage checker.")
-
