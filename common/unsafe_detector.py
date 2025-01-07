@@ -51,6 +51,7 @@ class UnsafeDetector(object):
         self.stuck_timeout = 60.0
         
         self.total_stuck_time = 0.0
+        self.total_block_time = 0.0
 
         self.acceleration_threshold = 5.0
 
@@ -89,7 +90,7 @@ class UnsafeDetector(object):
 
         self.start_stuck_monitor(self.stuck_timeout)
         # stop for test
-        # self.start_road_blockage_monitor()
+        self.start_road_blockage_monitor()
 
     def stop_detection(self):
         """Stops the detection of unsafe situations."""
@@ -154,19 +155,30 @@ class UnsafeDetector(object):
 
     def monitor_road_blockage(self):
         """Thread for monitoring road blockage."""
+        start_block_time = None
+        new_des_published = False
         while not self.road_blockage_event.is_set():
             # Implement road blockage detection
             road_blockage_result = self.is_road_blocked()
             if road_blockage_result["blocked"]:
-                is_solved = self.trigger_callbacks(
+                if start_block_time is None:
+                    start_block_time = time.time()
+                if new_des_published and time.time() - start_block_time < 3.0:
+                    # last block is releasing 
+                    time.sleep(0.05)
+                    continue
+                new_des_published = self.trigger_callbacks(
                     UNSAFE_TYPE.ROAD_BLOCKED,  # Or another suitable type
                     f"Road {road_blockage_result['blocked_road_id']} is blocked.",
                     road_blockage_result["vehicles_on_blocked_road"]
-                )
-                if is_solved:
-                    time.sleep(3)
-                    continue
-            time.sleep(1)  # Perform check every second
+                )                
+            else:
+                if start_block_time:
+                    # block has been released
+                    self.total_block_time += time.time() - start_block_time
+                    start_block_time = None
+                    new_des_published = False
+            time.sleep(0.05)  # Perform check every second
 
 
     def on_collision(self, event):
