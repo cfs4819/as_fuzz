@@ -29,6 +29,8 @@ from MS_fuzz.ga_engine.scene_segmentation import SceneSegment
 from MS_fuzz.common.result_saver import ResultSaver
 from MS_fuzz.planning.is_stuck import RoadBlockageChecker
 
+from MS_fuzz.planning.is_stuck import is_vehicle_in_front
+
 import pdb
 
 
@@ -455,6 +457,45 @@ class Simulator(object):
 
         return False, None
 
+    def resolve_blockage(self, vehicles, condition_func) -> bool:
+        """
+        Abstract function to resolve stuck vehicles based on a given condition.
+
+        :param vehicles: List of vehicle actors to evaluate.
+        :param condition_func: A function that takes a vehicle as input and returns True if the vehicle should be resolved.
+        """
+        target_vehicles = [
+            vehicle for vehicle in vehicles if condition_func(vehicle)]
+        if not target_vehicles:
+            logger.info("[ACTION] No stuck vehicles found")
+            return False
+
+        # Randomly choose one vehicle from the filtered list
+        vehicle_to_resolve = random.choice(target_vehicles)
+        logger.info(
+            f"[ACTION] Resolving stuck vehicle: Vehicle ID {vehicle_to_resolve.id}")
+
+        scenario_vehicle = None
+        search_list = self.curr_local_scenario.npc_vehicle_list + \
+            self.prev_local_scenario.npc_vehicle_list + \
+            self.next_local_scenario.npc_vehicle_list
+
+        for NPC_v in search_list:
+            if vehicle_to_resolve.id == NPC_v.vehicle.id:
+                scenario_vehicle = NPC_v
+                break
+        if not scenario_vehicle:
+            return False
+
+        new_dest = self.select_valid_dest(
+            min_radius=100, max_radius=9999)
+        new_dest_loc = new_dest.location
+
+        scenario_vehicle.agent.set_destination(new_dest_loc)
+        scenario_vehicle.end_loc = new_dest_loc
+        logger.info(f"[ACTION] New destination: {new_dest_loc}")
+        return True
+
     def on_unsafe(self, type, message, data=None):
         if self.on_unsafe_lock:
             return
@@ -469,7 +510,17 @@ class Simulator(object):
         trigger_time = time.time()
         time_pass = trigger_time - \
             self.result_saver.result_to_save['start_time']
-        if type == UNSAFE_TYPE.COLLISION:
+        if type == UNSAFE_TYPE.ROAD_BLOCKED:
+            # move the blocked vehicle away
+            blocked_vehicles = data     # [carla.Vehicle]
+
+            def condition_func(vehicle):
+                return is_vehicle_in_front(self.ego_vehicle, vehicle) and \
+                    vehicle.get_velocity().length() < 1.0
+                      
+            return self.resolve_blockage(blocked_vehicles, condition_func)
+
+        elif type == UNSAFE_TYPE.COLLISION:
             if time_pass > 5:
                 logger.info(f'[Unsafe Detected]: {message}')
                 self.result_saver.result_to_save['unsafe'] = True

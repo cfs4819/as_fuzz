@@ -14,6 +14,7 @@ class UNSAFE_TYPE():
     LANE_CHANGE = 3
     STUCK = 4
     ACCELERATION = 5
+    ROAD_BLOCKED = 6
 
     type_str = ['NONE',
                 'COLLISION',
@@ -154,11 +155,14 @@ class UnsafeDetector(object):
             # Implement road blockage detection
             road_blockage_result = self.is_road_blocked()
             if road_blockage_result["blocked"]:
-                self.trigger_callbacks(
-                    UNSAFE_TYPE.STUCK,  # Or another suitable type
+                is_solved = self.trigger_callbacks(
+                    UNSAFE_TYPE.ROAD_BLOCKED,  # Or another suitable type
                     f"Road {road_blockage_result['blocked_road_id']} is blocked.",
                     road_blockage_result["vehicles_on_blocked_road"]
                 )
+                if is_solved:
+                    time.sleep(3)
+                    continue
             time.sleep(1)  # Perform check every second
 
 
