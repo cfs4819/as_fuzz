@@ -30,14 +30,14 @@ class ApolloRoutingListener:
         self.node = None
         self.subscriber = None
 
-    def start(self):
-        self.main_thread = threading.Thread(target=self.run)
+    def start(self, node_name="routing_listener_node"):
+        self.main_thread = threading.Thread(target=self.run, args=(node_name,))
         self.main_thread.start()
 
-    def run(self):
+    def run(self, node_name="routing_listener_node"):
         # we don't init cyber here
         # cyber.init()
-        self.node = cyber.Node("routing_listener_node")
+        self.node = cyber.Node(node_name)
         self.subscriber = self.node.create_reader(
             "/apollo/routing_response", RoutingResponse, self.routing_callback)
         self.running = True

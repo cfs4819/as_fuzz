@@ -1,16 +1,18 @@
 import math
 import os
+import pdb
 import sys
 import random
 import time
+import signal
 
 import numpy as np
 import matplotlib.pyplot as plt
+
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.abspath(os.path.join(current_dir, '..'))
 sys.path.insert(0, parent_dir)
 from ms_utils.apollo_routing_listener import ApolloRoutingListener
-
 
 # def set_carla_api_path():
 #     # print('carla 0914 neednot be installed in this version ')
@@ -68,7 +70,7 @@ class Env:
         self.lane_grid.clear()
 
         for waypoint in self.waypoints:
-            # Get lane width and direction
+            # Get lane width and directio
             lane_width = waypoint.lane_width
             transform = waypoint.transform
             location = transform.location
@@ -91,11 +93,15 @@ class Env:
                 self.add_lane_cells(waypoint)
             # Add lanes to the left and right if available
             left_lane = waypoint.get_left_lane()
-            if left_lane and left_lane.lane_type == carla.LaneType.Driving:
+            if (left_lane and
+                left_lane.lane_type == carla.LaneType.Driving and
+                waypoint.lane_change in [carla.LaneChange.Left, carla.LaneChange.Both]):
                 self.add_lane_cells(left_lane)
 
             right_lane = waypoint.get_right_lane()
-            if right_lane and right_lane.lane_type == carla.LaneType.Driving:
+            if (right_lane and
+                right_lane.lane_type == carla.LaneType.Driving and
+                waypoint.lane_change in [carla.LaneChange.Right, carla.LaneChange.Both]):
                 self.add_lane_cells(right_lane)
 
     def add_lane_cells(self, waypoint):
@@ -222,116 +228,206 @@ class Env:
         """
         return int(location.x / self.resolution), int(location.y / self.resolution)
 
-    @staticmethod
-    def visualize_grid(lane_grid, obs_grid, ego_location, target_location):
-        """
-        Visualize the grid showing lanes and obstacles.
-        """
-        plt.figure(figsize=(10, 10))
-        lane_x, lane_y = zip(*lane_grid) if lane_grid else ([], [])
-        obs_x, obs_y = zip(*obs_grid) if obs_grid else ([], [])
+    # @staticmethod
+    # def visualize_grid(lane_grid, obs_grid, ego_location, target_location):
+    #     """
+    #     Visualize the grid showing lanes and obstacles.
+    #     """
+    #     plt.figure(figsize=(10, 10))
+    #     lane_x, lane_y = zip(*lane_grid) if lane_grid else ([], [])
+    #     obs_x, obs_y = zip(*obs_grid) if obs_grid else ([], [])
+    #
+    #     plt.scatter(lane_x, lane_y, c='blue', s=5, label='Lanes')
+    #     plt.scatter(obs_x, obs_y, c='red', s=5, label='Obstacles')
+    #     plt.scatter([ego_location[0]], [ego_location[1]], c='green', s=100, label='Ego Vehicle')
+    #     plt.scatter([target_location[0]], [target_location[1]], c='orange', s=100, label='Target')
+    #
+    #     plt.legend()
+    #     plt.xlabel('X')
+    #     plt.ylabel('Y')
+    #     plt.title('Grid Visualization')
+    #     plt.grid()
+    #     plt.show()
 
-        plt.scatter(lane_x, lane_y, c='blue', s=5, label='Lanes')
-        plt.scatter(obs_x, obs_y, c='red', s=5, label='Obstacles')
-        plt.scatter([ego_location[0]], [ego_location[1]], c='green', s=100, label='Ego Vehicle')
-        plt.scatter([target_location[0]], [target_location[1]], c='orange', s=100, label='Target')
+def save_grid(lane_grid, obs_grid, ego_location, target_location, filename="grid_visualization.png"):
+    """
+    Save the grid visualization showing lanes and obstacles to a file.
 
-        plt.legend()
-        plt.xlabel('X')
-        plt.ylabel('Y')
-        plt.title('Grid Visualization')
-        plt.grid()
-        plt.show()
+    :param lane_grid: Set of grid points representing lanes.
+    :param obs_grid: Set of grid points representing obstacles.
+    :param ego_location: Tuple (x, y) of the ego vehicle's location.
+    :param target_location: Tuple (x, y) of the target's location.
+    :param filename: Filename to save the visualization (default: "grid_visualization.png").
+    """
+    plt.figure(figsize=(10, 10))
+    lane_x, lane_y = zip(*lane_grid) if lane_grid else ([], [])
+    obs_x, obs_y = zip(*obs_grid) if obs_grid else ([], [])
+
+    plt.scatter(lane_x, lane_y, c='blue', s=5, label='Lanes')
+    plt.scatter(obs_x, obs_y, c='red', s=5, label='Obstacles')
+    plt.scatter([ego_location[0]], [ego_location[1]], c='green', s=100, label='Ego Vehicle')
+    plt.scatter([target_location[0]], [target_location[1]], c='orange', s=100, label='Target')
+
+    plt.legend()
+    plt.xlabel('X')
+    plt.ylabel('Y')
+    plt.title('Grid Visualization')
+    plt.grid()
+
+    # Save the figure to the specified file
+    plt.savefig(filename)
+    print(f"Grid visualization saved to {filename}.")
+    plt.close()  # Close the plot to free up memory
 
 
 def main():
     from cyber.python.cyber_py3 import cyber
     from loguru import logger
     """
-    Main function to test the Env class functionality with Carla.
+    Main function to continuously update and save grid visualization with Carla.
     """
     client = carla.Client('localhost', 4000)
     client.set_timeout(10.0)
     world = client.get_world()
 
-    # Get map and waypoints
+    # Get map and initial waypoints
     carla_map = world.get_map()
-    waypoints = carla_map.generate_waypoints(distance=2.0)
 
+    # Initialize Apollo Cyber RT
+    cyber.init()
+    logger.info("Apollo Cyber RT initialized.")
 
-    # Get obstacles
-    obstacles = [actor for actor in world.get_actors() if 'vehicle.' in actor.type_id]
-
-    # Find Ego vehicle
+    # Find Ego vehicle with retry mechanism
+    max_retries = 5
+    retry_interval = 2  # seconds
     ego_vehicle = None
-    for vehicle in world.get_actors().filter('vehicle.*'):
-        if "vehicle.lincoln.mkz_2017" in vehicle.type_id:
-            ego_vehicle = vehicle
-            if any(ego_vehicle.id == obs.id for obs in obstacles):  # Compare by ID
-                obstacles = [obs for obs in obstacles if obs.id != ego_vehicle.id]  # Remove by ID
+
+    for attempt in range(max_retries):
+        print(f"[INFO] Attempting to find ego vehicle (Attempt {attempt + 1}/{max_retries})...")
+        for vehicle in world.get_actors().filter('vehicle.*'):
+            if "vehicle.lincoln.mkz_2017" in vehicle.type_id:
+                ego_vehicle = vehicle
+                print("[INFO] Ego vehicle found.")
+                break
+        if ego_vehicle:
             break
+        else:
+            print(f"[WARNING] Ego vehicle not found. Retrying in {retry_interval} seconds...")
+            time.sleep(retry_interval)
 
     if not ego_vehicle:
-        print("[ERROR] No vehicle.lincoln.mkz_2017 found as ego vehicle.")
+        print("[ERROR] Failed to find vehicle.lincoln.mkz_2017 after multiple attempts.")
         return
-    cyber.init()
 
-    logger.info("Apollo Cyber RT initialized.")
+    # Initialize Apollo Routing Listener
     apollo_listener = ApolloRoutingListener(carla_world=world, ego_vehicle=ego_vehicle, debug=True)
-    apollo_listener.start()
+    apollo_listener.start("routing_test_node")
+
+    def signal_handler(sig, frame):
+        """Handle Ctrl+C to gracefully exit."""
+        print("\n[INFO] Ctrl+C detected. Shutting down...")
+        apollo_listener.stop()
+        cyber.shutdown()
+        sys.exit(0)
+
+    # Register the signal handler
+    signal.signal(signal.SIGINT, signal_handler)
+
+    print("Waiting for routing response...")
     while not apollo_listener.routing_wps:
-        print("Waiting for routing response...")
         time.sleep(0.5)
 
-    routing_waypoints = apollo_listener.routing_wps
+    print("Routing response received. Starting visualization loop...")
 
-    print(f"Received {len(routing_waypoints)} waypoints from routing.")
-    # Get ego vehicle location
-    ego_location = ego_vehicle.get_location()
-    ego_bounding_box = ego_vehicle.bounding_box
-    ego_waypoints = []
-    vehicle_transform = ego_vehicle.get_transform()
-    # Use bounding box corners to calculate lane occupation
-    bbox_vertices = ego_bounding_box.get_world_vertices(vehicle_transform)
+    while True:
+        try:
+            # Check if ego vehicle still exists
+            if ego_vehicle is None or ego_vehicle not in world.get_actors():
+                print("[WARNING] Ego vehicle is missing. Attempting to reacquire...")
+                ego_vehicle = None
+                for vehicle in world.get_actors().filter('vehicle.*'):
+                    if "vehicle.lincoln.mkz_2017" in vehicle.type_id:
+                        ego_vehicle = vehicle
+                        print("[INFO] Ego vehicle reacquired.")
+                        break
+                if ego_vehicle is None:
+                    print("[ERROR] Ego vehicle could not be reacquired. Exiting loop.")
+                    break
 
-    for vertex in bbox_vertices:
-        ego_waypoints.append(carla_map.get_waypoint(vertex, project_to_road=True, lane_type=carla.LaneType.Driving))
-    ego_grid = (int(ego_location.x), int(ego_location.y))
+            # Get ego vehicle location
+            retry_attempts = 3
+            for attempt in range(retry_attempts):
+                ego_location = ego_vehicle.get_location()
+                if ego_location.x != 0 or ego_location.y != 0:
+                    break
+                print(f"[WARNING] Ego vehicle location returned (0, 0). Retrying... ({attempt + 1}/{retry_attempts})")
+                time.sleep(0.5)
+            else:
+                print("[ERROR] Ego vehicle location invalid after retries. Exiting loop.")
+                break
 
-    map_waypoints = carla_map.generate_waypoints(distance=2.0)
-    # Randomly generate a target location
-    # Assuming map_waypoints is a list of waypoints
-    # Randomly generate a target location from driving lanes
-    driving_waypoints = [wp for wp in map_waypoints if wp.lane_type == carla.LaneType.Driving]
+            ego_bounding_box = ego_vehicle.bounding_box
+            vehicle_transform = ego_vehicle.get_transform()
 
-    if not driving_waypoints:
-        raise ValueError("No driving waypoints found in the map.")
+            # Update routing waypoints
+            routing_waypoints = apollo_listener.routing_wps
 
-    target_waypoint = random.choice(driving_waypoints)
-    target_location = target_waypoint.transform.location
-    target_grid = (int(target_location.x), int(target_location.y))
+            # Update obstacles
+            obstacles = [
+                actor for actor in world.get_actors()
+                if (('vehicle' in actor.type_id) and actor.id != ego_vehicle.id)
+            ]
 
-    # Set bounds
-    x_min, y_min, x_max, y_max = ego_location.x - 100, ego_location.y - 100, ego_location.x + 100, ego_location.y + 100
-    bounds = (x_min, y_min, x_max, y_max)
+            # Use bounding box corners to calculate lane occupation
+            bbox_vertices = ego_bounding_box.get_world_vertices(vehicle_transform)
+            ego_waypoints = []
+            for vertex in bbox_vertices:
+                ego_waypoints.append(
+                    carla_map.get_waypoint(vertex, project_to_road=True, lane_type=carla.LaneType.Driving))
+            ego_grid = (int(ego_location.x), int(ego_location.y))
 
-    # Initialize environment
-    env = Env(world, bounds, obstacles, carla_map, routing_waypoints, target_waypoint, resolution=1.0, safety_distance=0.5)
+            # Update target location
+            if routing_waypoints and routing_waypoints[-1]:
+                target_waypoint = routing_waypoints[-1][-1]
+                target_location = target_waypoint.transform.location
+                target_grid = (int(target_location.x), int(target_location.y))
+            else:
+                print("[ERROR] No valid target waypoint found. Exiting loop.")
+                break
 
-    # Check if ego and target are on lane
-    # if ego_grid in env.lane_grid:
-    #     print("[PASS] Ego vehicle is correctly on the lane grid.")
-    # else:
-    #     print("[FAIL] Ego vehicle is not on the lane grid.")
-    #
-    # if target_grid in env.lane_grid:
-    #     print("[PASS] Target location is correctly on the lane grid.")
-    # else:
-    #     print("[FAIL] Target location is not on the lane grid.")
+            # Set bounds
+            x_min, y_min, x_max, y_max = (
+                ego_location.x - 100,
+                ego_location.y - 100,
+                ego_location.x + 100,
+                ego_location.y + 100
+            )
+            bounds = (x_min, y_min, x_max, y_max)
 
-    # Visualize the grid
-    Env.visualize_grid(env.lane_grid, env.obs, ego_grid, target_grid)
+            # Update waypoints for the environment
+            waypoints = [waypoints_e[0] for waypoints_e in routing_waypoints if waypoints_e[0]]
+
+            # Initialize environment
+            env = Env(world, bounds, obstacles, carla_map, waypoints, target_waypoint, resolution=1.0,
+                      safety_distance=0.5)
+
+            # Save the grid visualization, overwriting the same file
+            filename = "grid_visualization.png"
+            save_grid(env.lane_grid, env.obs, ego_grid, target_grid, filename=filename)
+            print(f"[INFO] Saved updated grid visualization to {filename}")
+
+            time.sleep(1)  # Adjust the update interval as needed
+
+        except Exception as e:
+            print(f"[ERROR] Exception occurred during main loop: {e}")
+            break
 
 
 if __name__ == "__main__":
-    main()
+    from cyber.python.cyber_py3 import cyber
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n[INFO] KeyboardInterrupt detected. Exiting...")
+        cyber.shutdown()
+        sys.exit(0)
