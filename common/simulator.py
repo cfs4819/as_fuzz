@@ -623,6 +623,7 @@ class Simulator(object):
             time.sleep(1)
         self.recorder.stop_recording()
         curr_loc = self.ego_vehicle.get_location()
+        self.result_saver.result_to_save['stuck_time'] = self.unsafe_detector.total_stuck_time
         self.result_saver.save_result(curr_loc, save_video)
 
     def freeze_and_set_green_all_tls(self):

@@ -49,6 +49,8 @@ class UnsafeDetector(object):
         self.stuck_thread = None
         self.velocity_threshold = 0.1
         self.stuck_timeout = 60.0
+        
+        self.total_stuck_time = 0.0
 
         self.acceleration_threshold = 5.0
 
@@ -123,7 +125,8 @@ class UnsafeDetector(object):
                 self.trigger_callbacks(
                     UNSAFE_TYPE.STUCK, "Vehicle has been static for too long.")
                 start_time = None
-
+            elif start_time:
+                self.total_stuck_time += time.time() - start_time
             time.sleep(0.05)
 
     def stop_stuck_monitor(self):
