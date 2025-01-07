@@ -50,6 +50,89 @@ def is_vehicle_in_front(ego_vehicle, other_vehicle, distance_threshold=30.0) -> 
     return dot_product > 0 and distance <= distance_threshold
 
 
+# Function to calculate distance between two vehicles
+def calculate_distance(v1, v2):
+    """
+    Calculates the shortest distance between the bounding boxes of two vehicles.
+
+    :param v1: The first vehicle actor.
+    :param v2: The second vehicle actor.
+    :return: The shortest distance between the bounding boxes of the two vehicles.
+    """
+    bbox1 = v1.bounding_box
+    bbox2 = v2.bounding_box
+
+    # Transform the bounding boxes to world coordinates
+    vertices1 = bbox1.get_world_vertices(v1.get_transform())
+    vertices2 = bbox2.get_world_vertices(v2.get_transform())
+
+    min_distance = float('inf')
+
+    # Calculate the shortest distance between all pairs of vertices
+    for vertex1 in vertices1:
+        for vertex2 in vertices2:
+            distance = math.sqrt(
+                (vertex1.x - vertex2.x) ** 2 +
+                (vertex1.y - vertex2.y) ** 2 +
+                (vertex1.z - vertex2.z) ** 2
+            )
+            min_distance = min(min_distance, distance)
+
+    return min_distance
+
+
+def is_vehicle_accelerating(vehicle: carla.Vehicle) -> bool:
+    """
+    Checks if the vehicle is currently accelerating.
+    """
+    control = vehicle.get_control()
+    return control.throttle > 0.1 and control.brake == 0.0
+
+
+def resolve_stuck_vehicles(vehicles: List[carla.Actor], condition_func, throttle: float = 0.5,
+                           duration: float = 3.0):
+    """
+    Abstract function to resolve stuck vehicles based on a given condition.
+
+    :param vehicles: List of vehicle actors to evaluate.
+    :param condition_func: A function that takes a vehicle as input and returns True if the vehicle should be resolved.
+    :param throttle: Throttle value to apply to stuck vehicles (default: 0.5).
+    :param duration: Duration to apply the throttle (in seconds, default: 3.0).
+    """
+    # Filter vehicles based on the condition
+    target_vehicles = [vehicle for vehicle in vehicles if condition_func(vehicle)]
+
+    if not target_vehicles:
+        return
+
+    # Randomly choose one vehicle from the filtered list
+    vehicle_to_resolve = random.choice(target_vehicles)
+
+    print(f"[ACTION] Resolving stuck vehicle: Vehicle ID {vehicle_to_resolve.id}")
+    vehicle_to_resolve.apply_control(carla.VehicleControl(throttle=throttle, brake=0.0))
+
+    time.sleep(duration)
+
+    print(f"[ACTION] Resetting control for vehicle ID: {vehicle_to_resolve.id}")
+    vehicle_to_resolve.apply_control(carla.VehicleControl(throttle=0.0, brake=0.0))
+
+
+def resolve_intersection_stuck(vehicles: List[carla.Actor], throttle: float = 0.5, duration: float = 3.0):
+    """
+    Resolves vehicles stuck at intersections by applying throttle to vehicles
+    stopped for too long and with no vehicles in front.
+    """
+
+    def condition(vehicle):
+        # Vehicle is stopped and no vehicles are in front
+        speed = vehicle.get_velocity().length()
+        is_in_front = any(is_vehicle_in_front(vehicle, other_vehicle) for other_vehicle in vehicles if
+                          other_vehicle.id != vehicle.id)
+        return speed < 0.5 and not is_in_front
+
+    resolve_stuck_vehicles(vehicles, condition, throttle, duration)
+
+
 class RoadBlockageChecker:
     def __init__(self, carla_map: carla.Map, carla_world: carla.World):
         """
@@ -146,11 +229,11 @@ class RoadBlockageChecker:
 
     def is_road_blocked(self, vehicles: List[carla.Actor], distance_threshold: float) -> Dict:
         """
-        Determines whether the road is blocked based on the vehicles' positions and lane coverage.
+        Determines whether the road is blocked based on vehicles' positions using an expanding search.
         Each road is independently checked.
 
         :param vehicles: List of vehicle actors to consider for blockage checking.
-        :param distance_threshold: Threshold distance for neighboring vehicles.
+        :param distance_threshold: Max distance to consider neighboring vehicles for expansion.
         :return: Dictionary containing blockage status and additional details.
         """
 
@@ -170,110 +253,62 @@ class RoadBlockageChecker:
             road_vehicle_map[waypoint.road_id].append(vehicle)
 
         # Check each road
-        for road_id, vehicles in road_vehicle_map.items():
-
+        for road_id, road_vehicles in road_vehicle_map.items():
             # Dynamically fetch all lane IDs for this road
-            all_lane_ids = self.get_all_lane_ids(vehicles[0])  # Pass any vehicle on this road
+            all_lane_ids = self.get_all_lane_ids(road_vehicles[0])  # Use any vehicle on this road
+            visited = set()  # Tracks visited vehicles
+            blocks = []  # List of vehicle blocks
 
-            # Gather data for each vehicle: occupied lanes and distance from lane start
-            vehicle_data = [
-                {
-                    "vehicle": vehicle,
-                    "occupied_lanes": self.get_vehicle_lane_occupation(vehicle),
-                    "distance": self.compute_distance_from_lane_start(vehicle)
-                }
-                for vehicle in vehicles
-            ]
-
-            # Sort vehicles by their distance from the lane start
-            vehicle_data.sort(key=lambda x: x["distance"])
-
-            # Traverse vehicles and check blockage conditions
-            for i, vehicle_info in enumerate(vehicle_data):
-
-                current_lanes = set(vehicle_info["occupied_lanes"])
-                for other_vehicle_info in vehicle_data:
-                    # Skip vehicles outside the threshold distance
-                    if abs(other_vehicle_info["distance"] - vehicle_info["distance"]) > distance_threshold:
+            # Perform expansion for each vehicle
+            for vehicle in road_vehicles:
+                if vehicle.id in visited:
+                    continue
+                # Start a new block
+                block = []
+                queue = [vehicle]
+                while queue:
+                    current_vehicle = queue.pop(0)
+                    if current_vehicle.id in visited:
                         continue
-                    # Merge occupied lanes from neighboring vehicles
-                    current_lanes.update(other_vehicle_info["occupied_lanes"])
+                    # Mark as visited and add to current block
+                    visited.add(current_vehicle.id)
+                    block.append(current_vehicle)
+                    # Find neighbors within distance_threshold
+                    for other_vehicle in road_vehicles:
+                        if other_vehicle.id not in visited and calculate_distance(current_vehicle,
+                                                                                  other_vehicle) <= distance_threshold:
+                            queue.append(other_vehicle)
+                # Print the computed block
+                block_ids = [v.id for v in block]
+                print(f"[DEBUG] Computed cluster: {block_ids}")
+                # Save the completed block
+                blocks.append(block)
 
-                # Check if all lanes are covered
-                if set(all_lane_ids).issubset(current_lanes):
+            # Check if any block covers all lanes
+            for block in blocks:
+                covered_lanes = set()
+                for vehicle in block:
+                    covered_lanes.update(self.get_vehicle_lane_occupation(vehicle))
+                if set(all_lane_ids).issubset(covered_lanes):
                     result["blocked"] = True
                     result["blocked_road_id"] = road_id
-                    result["vehicles_on_blocked_road"] = [v["vehicle"] for v in vehicle_data]
+                    result["vehicles_on_blocked_road"] = block
                     return result
+
         return result
 
-    def is_vehicle_accelerating(self, vehicle: carla.Vehicle) -> bool:
-        """
-        Checks if the vehicle is currently accelerating.
-        """
-        control = vehicle.get_control()
-        return control.throttle > 0.1 and control.brake == 0.0
-
-    def resolve_stuck_vehicles(self, vehicles: List[carla.Actor], condition_func, throttle: float = 0.5,
-                               duration: float = 3.0):
-        """
-        Abstract function to resolve stuck vehicles based on a given condition.
-
-        :param vehicles: List of vehicle actors to evaluate.
-        :param condition_func: A function that takes a vehicle as input and returns True if the vehicle should be resolved.
-        :param throttle: Throttle value to apply to stuck vehicles (default: 0.5).
-        :param duration: Duration to apply the throttle (in seconds, default: 3.0).
-        """
-        # Filter vehicles based on the condition
-        target_vehicles = [vehicle for vehicle in vehicles if condition_func(vehicle)]
-
-        if not target_vehicles:
-            return
-
-        # Randomly choose one vehicle from the filtered list
-        vehicle_to_resolve = random.choice(target_vehicles)
-
-        print(f"[ACTION] Resolving stuck vehicle: Vehicle ID {vehicle_to_resolve.id}")
-        vehicle_to_resolve.apply_control(carla.VehicleControl(throttle=throttle, brake=0.0))
-
-        time.sleep(duration)
-
-        print(f"[ACTION] Resetting control for vehicle ID: {vehicle_to_resolve.id}")
-        vehicle_to_resolve.apply_control(carla.VehicleControl(throttle=0.0, brake=0.0))
-
-    def solve_blockage(self, ego_vehicle: carla.Vehicle, throttle: float = 0.5, duration: float = 3.0):
+    def solve_blockage(self, slow_vehicles, ego_vehicle: carla.Vehicle, throttle: float = 0.5, duration: float = 3.0):
         """
         Solves blockage by applying throttle to vehicles in front of the ego vehicle.
         """
 
-        # Check if the road is blocked
-        slow_vehicles = [
-            actor for actor in self.carla_world.get_actors()
-            if "vehicle" in actor.type_id and actor.get_velocity().length() < 0.5
-        ]
-
         def condition(vehicle):
-            # Vehicle is in front of ego and not accelerating
+            # The Vehicle is in front of ego and not speeding up
             return is_vehicle_in_front(ego_vehicle,
-                                       vehicle) and vehicle.get_velocity().length() < 1.0 and not self.is_vehicle_accelerating(
+                                       vehicle) and vehicle.get_velocity().length() < 1.0 and not is_vehicle_accelerating(
                 vehicle)
 
-        self.resolve_stuck_vehicles(slow_vehicles, condition, throttle, duration)
-
-    def resolve_intersection_stuck(self, vehicles: List[carla.Actor], throttle: float = 0.5, duration: float = 3.0):
-        """
-        Resolves vehicles stuck at intersections by applying throttle to vehicles
-        stopped for too long and with no vehicles in front.
-        """
-
-        def condition(vehicle):
-            # Vehicle is stopped and no vehicles are in front
-            speed = vehicle.get_velocity().length()
-            is_in_front = any(is_vehicle_in_front(vehicle, other_vehicle) for other_vehicle in vehicles if
-                              other_vehicle.id != vehicle.id)
-            return speed < 0.5 and not is_in_front
-
-        self.resolve_stuck_vehicles(vehicles, condition, throttle, duration)
+        resolve_stuck_vehicles(slow_vehicles, condition, throttle, duration)
 
 
 if __name__ == '__main__':
@@ -291,13 +326,12 @@ if __name__ == '__main__':
         print(vehicle.type_id)
         if "vehicle.lincoln.mkz_2017" in vehicle.type_id:
             ego_vehicle = vehicle
+            print(f"[INFO] Ego vehicle (Lincoln MKZ) found with ID: {ego_vehicle.id}")
             break
 
     if not ego_vehicle:
         print("[ERROR] No vehicle.lincoln.mkz_2017 found as ego vehicle.")
         exit(1)
-
-    print(f"[INFO] Ego vehicle (Tesla Model 3) found with ID: {ego_vehicle.id}")
 
     # Initialize the RoadBlockageChecker
     checker = RoadBlockageChecker(carla_map, world)
@@ -308,16 +342,22 @@ if __name__ == '__main__':
             # Retrieve background vehicles with speed < 0.5
             slow_vehicles = [
                 actor for actor in world.get_actors()
-                if "vehicle" in actor.type_id and actor.get_velocity().length() < 0.5
+                if "vehicle" in actor.type_id and
+                   actor.get_velocity().length() < 0.5
             ]
-
+            if ego_vehicle in slow_vehicles:
+                slow_vehicles.remove(ego_vehicle)
             # Solve blockage in front of ego vehicle
+            print("slow_vehicles:")
+            for slow_vehicle in slow_vehicles:
+                print(slow_vehicle.id)
+            print("[INFO] Checking for road blockage...")
             blockage_result = checker.is_road_blocked(slow_vehicles, distance_threshold=5.0)
             if blockage_result:
-                checker.solve_blockage(ego_vehicle, throttle=1.0, duration=3.0)
+                checker.solve_blockage(slow_vehicles, ego_vehicle, throttle=1.0, duration=3.0)
 
-            # Resolve vehicles stuck at intersections
-            checker.resolve_intersection_stuck(slow_vehicles, throttle=1.0, duration=3.0)
+            # # Resolve vehicles stuck at intersections
+            # resolve_intersection_stuck(slow_vehicles, throttle=0.5, duration=3.0)
 
             # Wait for 1 second before the next check
             time.sleep(1)
