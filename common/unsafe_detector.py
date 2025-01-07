@@ -21,7 +21,8 @@ class UNSAFE_TYPE():
                 'CROSSING_SOLID_LANE',
                 'LANE_CHANGE',
                 'STUCK',
-                'ACCELERATION']
+                'ACCELERATION',
+                'ROAD_BLOCKED']
 
 
 class UnsafeDetector(object):
@@ -39,7 +40,7 @@ class UnsafeDetector(object):
         self.road_blockage_thread = None
         # Road blockage checker
         self.road_blockage_checker = RoadBlockageChecker(self.map, world)
-        self.distance_threshold = 5.0  # Example threshold for road blockage
+        self.distance_threshold = 2.5  # Example threshold for road blockage
 
         self.active_timers = {}
         self.timers_lock = Lock()
@@ -49,7 +50,7 @@ class UnsafeDetector(object):
         self.stuck_thread = None
         self.velocity_threshold = 0.1
         self.stuck_timeout = 60.0
-        
+
         self.total_stuck_time = 0.0
         self.total_block_time = 0.0
 
@@ -63,7 +64,14 @@ class UnsafeDetector(object):
         Checks if any road is blocked based on the current state of the world.
         :return: Dictionary containing blockage status and details.
         """
-        return self.road_blockage_checker.is_road_blocked()
+        slow_vehicles = [
+            actor for actor in self.world.get_actors()
+            if "vehicle" in actor.type_id and
+               actor.get_velocity().length() < 0.5
+        ]
+        if self.vehicle in slow_vehicles:
+            slow_vehicles.remove(self.vehicle)
+        return self.road_blockage_checker.is_road_blocked(slow_vehicles, self.distance_threshold)
 
     def init_sensors(self):
         # Setup the lane invasion and collision sensors
@@ -89,7 +97,6 @@ class UnsafeDetector(object):
         self.imu_sensor.listen(self.on_imu_data)  # Add IMU data listener
 
         self.start_stuck_monitor(self.stuck_timeout)
-        # stop for test
         self.start_road_blockage_monitor()
 
     def stop_detection(self):
@@ -163,23 +170,23 @@ class UnsafeDetector(object):
             if road_blockage_result["blocked"]:
                 if start_block_time is None:
                     start_block_time = time.time()
+                print(f"unsafe:Road {road_blockage_result['blocked_road_id']} is blocked.")
                 if new_des_published and time.time() - start_block_time < 3.0:
-                    # last block is releasing 
-                    time.sleep(0.05)
+                    # last block is releasing
+                    time.sleep(0.5)
                     continue
                 new_des_published = self.trigger_callbacks(
                     UNSAFE_TYPE.ROAD_BLOCKED,  # Or another suitable type
                     f"Road {road_blockage_result['blocked_road_id']} is blocked.",
                     road_blockage_result["vehicles_on_blocked_road"]
-                )                
+                )
             else:
                 if start_block_time:
                     # block has been released
                     self.total_block_time += time.time() - start_block_time
                     start_block_time = None
                     new_des_published = False
-            time.sleep(0.05)  # Perform check every second
-
+            time.sleep(0.5)  # Perform check every second
 
     def on_collision(self, event):
         # Handle collision events

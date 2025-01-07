@@ -3,7 +3,7 @@ import math
 import random
 import sys
 import time
-from typing import List, Dict
+from typing import List, Dict, Set, Tuple
 
 
 def set_carla_api_path():
@@ -143,11 +143,11 @@ class RoadBlockageChecker:
         self.carla_map = carla_map
         self.carla_world = carla_world
 
-    def get_vehicle_lane_occupation(self, vehicle: carla.Actor) -> List[int]:
+    def get_vehicle_lane_occupation(self, vehicle: carla.Actor) -> List[Tuple[int, int]]:
         """
-        Calculates the list of lane IDs occupied by the vehicle.
+        Calculates the list of (road_id, lane_id) pairs occupied by the vehicle.
         :param vehicle: CARLA vehicle actor
-        :return: List of lane IDs occupied by the vehicle
+        :return: List of (road_id, lane_id) pairs occupied by the vehicle
         """
         vehicle_bbox = vehicle.bounding_box
         vehicle_transform = vehicle.get_transform()
@@ -159,84 +159,137 @@ class RoadBlockageChecker:
         for vertex in bbox_vertices:
             waypoint = self.carla_map.get_waypoint(vertex, project_to_road=True, lane_type=carla.LaneType.Driving)
             if waypoint:
-                occupied_lanes.add(waypoint.lane_id)
+                occupied_lanes.add((waypoint.road_id, waypoint.lane_id))
 
         return list(occupied_lanes)
 
-    def compute_distance_from_lane_start(self, vehicle: carla.Actor) -> float:
+    def get_lane_clusters(self, waypoint: carla.Waypoint) -> List[Set[int]]:
         """
-        Computes the distance of the vehicle from the start of the lane.
-        :param vehicle: CARLA vehicle actor
-        :return:  Distanced from the start of the lane in meters
-        """
-        vehicle_location = vehicle.get_location()
-        waypoint = self.carla_map.get_waypoint(vehicle_location, project_to_road=True, lane_type=carla.LaneType.Driving)
-        return waypoint.s if waypoint else float('inf')  # Return infinity if no valid waypoint is found
+        Get all lane clusters based on lane change relationships starting from a given waypoint.
 
-    def get_all_lane_ids(self, vehicle: carla.Actor) -> List[int]:
+        :param waypoint: Starting waypoint for clustering
+        :return: List of lane clusters,is_road_blocked where each cluster is a set of lane IDs
         """
-        Dynamically determine all lane IDs for the road where the given vehicle is located.
-
-        :param vehicle: The Carla vehicle actor
-        :return: List of lane IDs for the road
-        """
-        waypoint = self.carla_map.get_waypoint(
-            vehicle.get_location(),
-            project_to_road=True,
-            lane_type=carla.LaneType.Driving
-        )
         if not waypoint:
-            print("[DEBUG] No valid waypoint found for vehicle. Returning empty lane ID list.")
+            print("[ERROR] Invalid starting waypoint.")
             return []
 
-        # Retrieve all lanes on the current road
-        road_id = waypoint.road_id
-        lane_ids = set()
-        visited_waypoints = set()
+        road_id = waypoint.road_id  # Restrict clustering to this road
+        visited = set()
+        clusters = []
 
-        # Function to traverse in one direction (right or left)
-        def traverse_lanes(start_waypoint, direction_func, max_iterations=50):
+        def traverse_cluster(start_waypoint, cluster):
             """
-            Traverse lanes in a specified direction (left or right).
-
-            :param start_waypoint: Starting waypoint for traversal
-            :param direction_func: Function to get the next waypoint (get_right_lane or get_left_lane)
-            :param max_iterations: Maximum iterations to prevent infinite loops
+            Recursively traverse connected lanes and add them to the cluster.
             """
-            current_waypoint = start_waypoint
-            iteration_count = 0
+            if not start_waypoint:
+                return
 
-            while current_waypoint and current_waypoint.road_id == road_id:
-                if current_waypoint.lane_id in lane_ids:
-                    break  # Avoid re-visiting lanes
-                lane_ids.add(current_waypoint.lane_id)
-                visited_waypoints.add(current_waypoint)
+            lane_key = (start_waypoint.road_id, start_waypoint.lane_id)
+            if lane_key in visited or start_waypoint.road_id != road_id:
+                return
 
-                current_waypoint = direction_func()
-                iteration_count += 1
+            visited.add(lane_key)
+            cluster.add(lane_key)
 
-                if iteration_count >= max_iterations:
-                    print("[WARNING] Reached maximum iterations while traversing lanes.")
-                    break
+            # Expand left and right based on lane change
+            if start_waypoint.lane_change in [carla.LaneChange.Left, carla.LaneChange.Both]:
+                traverse_cluster(start_waypoint.get_left_lane(), cluster)
+            if start_waypoint.lane_change in [carla.LaneChange.Right, carla.LaneChange.Both]:
+                traverse_cluster(start_waypoint.get_right_lane(), cluster)
 
-        # Traverse right lanes
-        traverse_lanes(waypoint, waypoint.get_right_lane)
+        # Start clustering from the given waypoint
+        cluster = set()
+        traverse_cluster(waypoint, cluster)
+        if cluster:
+            clusters.append(cluster)
 
-        # Traverse left lanes
-        traverse_lanes(waypoint.get_left_lane(), lambda: waypoint.get_left_lane())
+        return clusters
 
-        return sorted(lane_ids)
+    def get_vehicle_clusters(self, vehicles: List[carla.Actor], distance_threshold: float) -> List[Set[carla.Actor]]:
+        """
+        Get all vehicle clusters based on distance relationships.
+
+        :param vehicles: List of vehicle actors
+        :param distance_threshold: Distance threshold for clustering
+        :return: List of vehicle clusters, where each cluster is a set of vehicle actors
+        """
+        visited = set()
+        clusters = []
+
+        def traverse_cluster(start_vehicle, cluster):
+            if start_vehicle in visited:
+                return
+            visited.add(start_vehicle)
+            cluster.add(start_vehicle)
+
+            # Find neighbors within distance threshold
+            for other_vehicle in vehicles:
+                if other_vehicle not in visited and calculate_distance(start_vehicle,
+                                                                       other_vehicle) <= distance_threshold:
+                    traverse_cluster(other_vehicle, cluster)
+
+        for vehicle in vehicles:
+            if vehicle not in visited:
+                cluster = set()
+                traverse_cluster(vehicle, cluster)
+                if cluster:
+                    clusters.append(cluster)
+
+        return clusters
+
+    def get_all_lane_clusters(self, vehicles: List[carla.Actor]) -> List[Set[int]]:
+        """
+        Compute all unique lane clusters based on all vehicles' starting positions.
+
+        :param vehicles: List of vehicle actors
+        :return: List of unique lane clusters (each cluster is a set of lane IDs)
+        """
+
+        def are_clusters_equal(cluster1: Set[int], cluster2: Set[int]) -> bool:
+            """
+            Compare two clusters (sets) to determine if they contain the same elements.
+
+            :param cluster1: First cluster (set of integers)
+            :param cluster2: Second cluster (set of integers)
+            :return: True if the clusters are equal, False otherwise
+            """
+            if len(cluster1) != len(cluster2):
+                return False
+            for elem in cluster1:
+                if elem not in cluster2:
+                    return False
+            return True
+
+        all_clusters = []
+
+        for vehicle in vehicles:
+            waypoint = self.carla_map.get_waypoint(
+                vehicle.get_location(), project_to_road=True, lane_type=carla.LaneType.Driving
+            )
+            if waypoint:
+                clusters = self.get_lane_clusters(waypoint)
+                all_clusters.extend(clusters)
+
+        # Manual removal of duplicates
+        unique_clusters = []
+        for cluster in all_clusters:
+            if not any(are_clusters_equal(cluster, unique) for unique in unique_clusters):
+                unique_clusters.append(cluster)
+
+        return unique_clusters
 
     def is_road_blocked(self, vehicles: List[carla.Actor], distance_threshold: float) -> Dict:
         """
-        Determines whether the road is blocked based on vehicles' positions using an expanding search.
-        Each road is independently checked.
+        Determines whether any road is blocked based on overlapping vehicle clusters.
 
-        :param vehicles: List of vehicle actors to consider for blockage checking.
-        :param distance_threshold: Max distance to consider neighboring vehicles for expansion.
-        :return: Dictionary containing blockage status and additional details.
+        :param vehicles: List of vehicle actors
+        :param distance_threshold: Max distance to consider neighboring vehicles for clustering
+        :return: Dictionary containing blockage status and additional details:
+                 - blocked (bool): Whether the road is blocked.
+                 - blocked_road_id (int): The road ID of the blocked road.
+                 - vehicles_on_blocked_road (List[carla.Actor]): Vehicles causing the blockage.
         """
-
         result = {
             "blocked": False,
             "blocked_road_id": None,
@@ -246,55 +299,44 @@ class RoadBlockageChecker:
         # Group vehicles by road ID
         road_vehicle_map = collections.defaultdict(list)
         for vehicle in vehicles:
-            waypoint = self.carla_map.get_waypoint(vehicle.get_location(), project_to_road=True,
-                                                   lane_type=carla.LaneType.Driving)
-            if not waypoint:
-                continue
-            road_vehicle_map[waypoint.road_id].append(vehicle)
+            waypoint = self.carla_map.get_waypoint(
+                vehicle.get_location(),
+                project_to_road=True,
+                lane_type=carla.LaneType.Driving
+            )
+            if waypoint:
+                road_vehicle_map[waypoint.road_id].append(vehicle)
 
         # Check each road
+        print(f"[DEBUG] Found {len(road_vehicle_map)} unique roads.")
         for road_id, road_vehicles in road_vehicle_map.items():
-            # Dynamically fetch all lane IDs for this road
-            all_lane_ids = self.get_all_lane_ids(road_vehicles[0])  # Use any vehicle on this road
-            visited = set()  # Tracks visited vehicles
-            blocks = []  # List of vehicle blocks
 
-            # Perform expansion for each vehicle
-            for vehicle in road_vehicles:
-                if vehicle.id in visited:
-                    continue
-                # Start a new block
-                block = []
-                queue = [vehicle]
-                while queue:
-                    current_vehicle = queue.pop(0)
-                    if current_vehicle.id in visited:
-                        continue
-                    # Mark as visited and add to current block
-                    visited.add(current_vehicle.id)
-                    block.append(current_vehicle)
-                    # Find neighbors within distance_threshold
-                    for other_vehicle in road_vehicles:
-                        if other_vehicle.id not in visited and calculate_distance(current_vehicle,
-                                                                                  other_vehicle) <= distance_threshold:
-                            queue.append(other_vehicle)
-                # Print the computed block
-                block_ids = [v.id for v in block]
-                print(f"[DEBUG] Computed cluster: {block_ids}")
-                # Save the completed block
-                blocks.append(block)
+            # Generate lane clusters specific to this road
+            lane_clusters_on_road = self.get_all_lane_clusters(road_vehicles)
+            print(f"[DEBUG] Found {len(lane_clusters_on_road)} Lane Clusters on Road {road_id}")
 
-            # Check if any block covers all lanes
-            for block in blocks:
-                covered_lanes = set()
-                for vehicle in block:
-                    covered_lanes.update(self.get_vehicle_lane_occupation(vehicle))
-                if set(all_lane_ids).issubset(covered_lanes):
-                    result["blocked"] = True
-                    result["blocked_road_id"] = road_id
-                    result["vehicles_on_blocked_road"] = block
-                    return result
+            # Generate vehicle clusters and precompute occupied lanes
+            vehicle_clusters = self.get_vehicle_clusters(road_vehicles, distance_threshold)
+            cluster_occupancy = []
+            for vehicle_cluster in vehicle_clusters:
+                vehicle_lanes = set()
+                for vehicle in vehicle_cluster:
+                    vehicle_lanes.update(self.get_vehicle_lane_occupation(vehicle))
+                cluster_occupancy.append((vehicle_cluster, vehicle_lanes))
+                print(f"[DEBUG] Vehicle Cluster: {[vehicle.id for vehicle in vehicle_cluster]}")
 
+            # Check each lane cluster for blockage
+            for lane_cluster in lane_clusters_on_road:
+                for vehicle_cluster, vehicle_lanes in cluster_occupancy:
+                    if lane_cluster.issubset(vehicle_lanes):
+                        print(f"[INFO] Road ID {road_id} is blocked.")
+                        result["blocked"] = True
+                        result["blocked_road_id"] = road_id
+                        result["vehicles_on_blocked_road"] = list(vehicle_cluster)
+                        print(f"[INFO] Vehicles on Blocked Road: {[vehicle.id for vehicle in vehicle_cluster]}")
+                        return result
+
+        print("[INFO] No roads are blocked.")
         return result
 
     def solve_blockage(self, slow_vehicles, ego_vehicle: carla.Vehicle, throttle: float = 0.5, duration: float = 3.0):
@@ -336,7 +378,7 @@ if __name__ == '__main__':
     # Initialize the RoadBlockageChecker
     checker = RoadBlockageChecker(carla_map, world)
 
-    distance_threshold = 5.0  # Define the distance threshold for neighboring vehicles
+    distance_threshold = 2.5  # Define the distance threshold for neighboring vehicles
     try:
         while True:
             # Retrieve background vehicles with speed < 0.5
@@ -352,7 +394,7 @@ if __name__ == '__main__':
             for slow_vehicle in slow_vehicles:
                 print(slow_vehicle.id)
             print("[INFO] Checking for road blockage...")
-            blockage_result = checker.is_road_blocked(slow_vehicles, distance_threshold=5.0)
+            blockage_result = checker.is_road_blocked(slow_vehicles, distance_threshold=distance_threshold)
             if blockage_result:
                 checker.solve_blockage(slow_vehicles, ego_vehicle, throttle=1.0, duration=3.0)
 

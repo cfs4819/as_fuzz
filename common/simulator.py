@@ -191,7 +191,7 @@ class Simulator(object):
         Connect to carla simualtor.
         '''
         if (self.carla_client != None
-                and self.carla_world != None):
+            and self.carla_world != None):
             logger.warning("Connection already exists")
             return
         try:
@@ -333,7 +333,7 @@ class Simulator(object):
         self.dv.set_destination_tranform(self.destination)
         for attempt in range(retry_attempts):
             if not self.scene_segmentation.wait_for_route(
-                    route_req_time, wait_from_req_time=True, timeout=timeout_period):
+                route_req_time, wait_from_req_time=True, timeout=timeout_period):
                 logger.warning(
                     f"[Simulator] Apollo failed to find the route, retry {attempt + 1}")
                 self.dv.set_destination_tranform(self.destination)
@@ -387,6 +387,7 @@ class Simulator(object):
                 - bool: True if a vehicle is blocking the path, False otherwise.
                 - carla.Vehicle: The blocking vehicle object, or None if no vehicle is detected.
         """
+
         def get_route_polygon():
             """
             Generate a polygon representing the area in front of the ego vehicle's route.
@@ -397,9 +398,9 @@ class Simulator(object):
             l_ext = -extent_y
             r_vec = ego_transform.get_right_vector()
             p1 = ego_location + \
-                carla.Location(r_ext * r_vec.x, r_ext * r_vec.y)
+                 carla.Location(r_ext * r_vec.x, r_ext * r_vec.y)
             p2 = ego_location + \
-                carla.Location(l_ext * r_vec.x, l_ext * r_vec.y)
+                 carla.Location(l_ext * r_vec.x, l_ext * r_vec.y)
             route_bb.extend([[p1.x, p1.y, p1.z], [p2.x, p2.y, p2.z]])
 
             for wp, _ in local_planner.get_plan():
@@ -407,9 +408,9 @@ class Simulator(object):
                     break
                 r_vec = wp.transform.get_right_vector()
                 p1 = wp.transform.location + \
-                    carla.Location(r_ext * r_vec.x, r_ext * r_vec.y)
+                     carla.Location(r_ext * r_vec.x, r_ext * r_vec.y)
                 p2 = wp.transform.location + \
-                    carla.Location(l_ext * r_vec.x, l_ext * r_vec.y)
+                     carla.Location(l_ext * r_vec.x, l_ext * r_vec.y)
                 route_bb.extend([[p1.x, p1.y, p1.z], [p2.x, p2.y, p2.z]])
 
             # Ensure the polygon has enough points to form a valid shape
@@ -450,7 +451,7 @@ class Simulator(object):
             target_bb = target_vehicle.bounding_box
             target_vertices = target_bb.get_world_vertices(target_transform)
             target_polygon = Polygon([[v.x, v.y, v.z]
-                                     for v in target_vertices])
+                                      for v in target_vertices])
 
             if route_polygon.intersects(target_polygon):
                 return True, target_vehicle
@@ -476,16 +477,22 @@ class Simulator(object):
             f"[ACTION] Resolving stuck vehicle: Vehicle ID {vehicle_to_resolve.id}")
 
         scenario_vehicle = None
-        search_list = self.curr_local_scenario.npc_vehicle_list + \
-            self.prev_local_scenario.npc_vehicle_list + \
-            self.next_local_scenario.npc_vehicle_list
+        search_list = []
 
+        if self.curr_local_scenario and self.curr_local_scenario.npc_vehicle_list:
+            search_list += self.curr_local_scenario.npc_vehicle_list
+
+        if self.prev_local_scenario and self.prev_local_scenario.npc_vehicle_list:
+            search_list += self.prev_local_scenario.npc_vehicle_list
+
+        if self.next_local_scenario and self.next_local_scenario.npc_vehicle_list:
+            search_list += self.next_local_scenario.npc_vehicle_list
+
+        # some bug here
         for NPC_v in search_list:
             if vehicle_to_resolve.id == NPC_v.vehicle.id:
                 scenario_vehicle = NPC_v
                 break
-        if not scenario_vehicle:
-            return False
 
         new_dest = self.select_valid_dest(
             min_radius=100, max_radius=9999)
@@ -509,15 +516,16 @@ class Simulator(object):
     '''
         trigger_time = time.time()
         time_pass = trigger_time - \
-            self.result_saver.result_to_save['start_time']
+                    self.result_saver.result_to_save['start_time']
         if type == UNSAFE_TYPE.ROAD_BLOCKED:
+            logger.info(f'[Unsafe Detected]: {message}')
             # move the blocked vehicle away
-            blocked_vehicles = data     # [carla.Vehicle]
+            blocked_vehicles = data  # [carla.Vehicle]
 
             def condition_func(vehicle):
                 return is_vehicle_in_front(self.ego_vehicle, vehicle) and \
                     vehicle.get_velocity().length() < 1.0
-                      
+
             return self.resolve_blockage(blocked_vehicles, condition_func)
 
         elif type == UNSAFE_TYPE.COLLISION:
@@ -722,7 +730,7 @@ class Simulator(object):
                         self.curr_local_scenario.scenario_start()
 
                 if self.curr_local_scenario != None and \
-                        self.curr_local_scenario.evaluate_obj != None:
+                    self.curr_local_scenario.evaluate_obj != None:
                     log_id = f'{curr_index}_{self.curr_local_scenario.evaluate_obj.id}'
                 else:
                     log_id = f'{curr_index}'
@@ -833,7 +841,7 @@ class Simulator(object):
         module_status = self.dv.get_module_status()
         for module, status in module_status.items():
             if (module not in self.modules
-                    or status):
+                or status):
                 continue
             if module == "Prediction" or module == "Planning":
                 logger.warning('[Simulator] Module is closed: '
