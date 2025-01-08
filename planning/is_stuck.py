@@ -326,8 +326,6 @@ class RoadBlockageChecker:
                         result["blocked"] = True
                         result["blocked_road_id"] = road_id
                         result["vehicles_on_blocked_road"] = list(vehicle_cluster)
-                        print(f"[INFO] Road ID {road_id} is blocked.")
-                        print(f"[INFO] Vehicles on Blocked Road: {[vehicle.id for vehicle in vehicle_cluster]}")
                         return result
 
         return result

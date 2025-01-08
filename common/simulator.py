@@ -485,22 +485,47 @@ class Simulator(object):
         if self.prev_local_scenario and self.prev_local_scenario.npc_vehicle_list:
             search_list += self.prev_local_scenario.npc_vehicle_list
 
-        if self.next_local_scenario and self.next_local_scenario.npc_vehicle_list:
-            search_list += self.next_local_scenario.npc_vehicle_list
-
-        # some bug here
         for NPC_v in search_list:
+            if not NPC_v.vehicle:
+                continue
+            if not vehicle_to_resolve:
+                return False
             if vehicle_to_resolve.id == NPC_v.vehicle.id:
                 scenario_vehicle = NPC_v
                 break
+        if scenario_vehicle:
+            # stucked vehicle belongs to curr or prev,  set new dest
+            new_dest = self.select_valid_dest(
+                min_radius=100, max_radius=9999)
+            new_dest_loc = new_dest.location
 
-        new_dest = self.select_valid_dest(
-            min_radius=100, max_radius=9999)
-        new_dest_loc = new_dest.location
+            scenario_vehicle.agent.set_destination(new_dest_loc)
+            scenario_vehicle.end_loc = new_dest_loc
+            logger.info(f"[ACTION] New destination: {new_dest_loc}")
+        else:
+            # check next scenario
+            if not self.next_local_scenario:
+                return False            
+            if self.next_local_scenario.running:
+                # set new dest
+                for NPC_v in self.next_local_scenario.npc_vehicle_list:
+                    if not NPC_v.vehicle:
+                        continue
+                    if not vehicle_to_resolve:
+                        return False
+                    if vehicle_to_resolve.id == NPC_v.vehicle.id:
+                        scenario_vehicle = NPC_v
+                        break
+                if scenario_vehicle:
+                    new_dest = self.select_valid_dest(
+                        min_radius=100, max_radius=9999)
+                    new_dest_loc = new_dest.location
 
-        scenario_vehicle.agent.set_destination(new_dest_loc)
-        scenario_vehicle.end_loc = new_dest_loc
-        logger.info(f"[ACTION] New destination: {new_dest_loc}")
+                    scenario_vehicle.agent.set_destination(new_dest_loc)
+                    scenario_vehicle.end_loc = new_dest_loc
+                    logger.info(f"[ACTION] New destination: {new_dest_loc}")
+            else:
+                self.next_local_scenario.start()
         return True
 
     def on_unsafe(self, type, message, data=None):

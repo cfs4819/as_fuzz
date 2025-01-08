@@ -118,7 +118,7 @@ class UnsafeDetector(object):
     def monitor_stuck(self, timeout):
         """Monitor vehicle's velocity and trigger callbacks if stuck for too long."""
         start_time = None
-
+        last_calc_time = time.time()
         while not self.stuck_event.is_set():
             current_velocity = self.vehicle.get_velocity()
             speed = current_velocity.length()
@@ -126,6 +126,7 @@ class UnsafeDetector(object):
             if speed < self.velocity_threshold:
                 if start_time is None:
                     start_time = time.time()
+                    last_calc_time = time.time()
             else:
                 start_time = None
 
@@ -134,7 +135,8 @@ class UnsafeDetector(object):
                     UNSAFE_TYPE.STUCK, "Vehicle has been static for too long.")
                 start_time = None
             elif start_time:
-                self.total_stuck_time += time.time() - start_time
+                self.total_stuck_time += time.time() - last_calc_time
+                last_calc_time = time.time()
             time.sleep(0.05)
 
     def stop_stuck_monitor(self):
