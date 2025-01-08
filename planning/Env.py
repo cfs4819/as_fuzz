@@ -228,27 +228,6 @@ class Env:
         """
         return int(location.x / self.resolution), int(location.y / self.resolution)
 
-    # @staticmethod
-    # def visualize_grid(lane_grid, obs_grid, ego_location, target_location):
-    #     """
-    #     Visualize the grid showing lanes and obstacles.
-    #     """
-    #     plt.figure(figsize=(10, 10))
-    #     lane_x, lane_y = zip(*lane_grid) if lane_grid else ([], [])
-    #     obs_x, obs_y = zip(*obs_grid) if obs_grid else ([], [])
-    #
-    #     plt.scatter(lane_x, lane_y, c='blue', s=5, label='Lanes')
-    #     plt.scatter(obs_x, obs_y, c='red', s=5, label='Obstacles')
-    #     plt.scatter([ego_location[0]], [ego_location[1]], c='green', s=100, label='Ego Vehicle')
-    #     plt.scatter([target_location[0]], [target_location[1]], c='orange', s=100, label='Target')
-    #
-    #     plt.legend()
-    #     plt.xlabel('X')
-    #     plt.ylabel('Y')
-    #     plt.title('Grid Visualization')
-    #     plt.grid()
-    #     plt.show()
-
 def save_grid(lane_grid, obs_grid, ego_location, target_location, filename="grid_visualization.png"):
     """
     Save the grid visualization showing lanes and obstacles to a file.
