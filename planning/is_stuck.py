@@ -209,32 +209,30 @@ class RoadBlockageChecker:
     def get_vehicle_clusters(self, vehicles: List[carla.Actor], distance_threshold: float) -> List[Set[carla.Actor]]:
         """
         Get all vehicle clusters based on distance relationships.
+        A vehicle can appear in multiple clusters if it satisfies the distance threshold with multiple clusters.
 
         :param vehicles: List of vehicle actors
         :param distance_threshold: Distance threshold for clustering
         :return: List of vehicle clusters, where each cluster is a set of vehicle actors
         """
-        visited = set()
         clusters = []
 
-        def traverse_cluster(start_vehicle, cluster):
-            if start_vehicle in visited:
-                return
-            visited.add(start_vehicle)
-            cluster.add(start_vehicle)
-
-            # Find neighbors within distance threshold
-            for other_vehicle in vehicles:
-                if other_vehicle not in visited and calculate_distance(start_vehicle,
-                                                                       other_vehicle) <= distance_threshold:
-                    traverse_cluster(other_vehicle, cluster)
+        def are_vehicles_close(vehicle1, vehicle2):
+            """
+            Determine if two vehicles are within the distance threshold.
+            """
+            return calculate_distance(vehicle1, vehicle2) <= distance_threshold
 
         for vehicle in vehicles:
-            if vehicle not in visited:
-                cluster = set()
-                traverse_cluster(vehicle, cluster)
-                if cluster:
-                    clusters.append(cluster)
+            added_to_cluster = False
+            for cluster in clusters:
+                # Check if this vehicle is close to any vehicle in the existing cluster
+                if any(are_vehicles_close(vehicle, cluster_vehicle) for cluster_vehicle in cluster):
+                    cluster.add(vehicle)
+                    added_to_cluster = True
+            if not added_to_cluster:
+                # Create a new cluster if the vehicle doesn't belong to any existing cluster
+                clusters.append({vehicle})
 
         return clusters
 
@@ -308,35 +306,30 @@ class RoadBlockageChecker:
                 road_vehicle_map[waypoint.road_id].append(vehicle)
 
         # Check each road
-        print(f"[DEBUG] Found {len(road_vehicle_map)} unique roads.")
         for road_id, road_vehicles in road_vehicle_map.items():
-
             # Generate lane clusters specific to this road
             lane_clusters_on_road = self.get_all_lane_clusters(road_vehicles)
-            print(f"[DEBUG] Found {len(lane_clusters_on_road)} Lane Clusters on Road {road_id}")
 
-            # Generate vehicle clusters and precompute occupied lanes
+            # Generate vehicle clusters (vehicles can be in multiple clusters)
             vehicle_clusters = self.get_vehicle_clusters(road_vehicles, distance_threshold)
-            cluster_occupancy = []
-            for vehicle_cluster in vehicle_clusters:
-                vehicle_lanes = set()
-                for vehicle in vehicle_cluster:
-                    vehicle_lanes.update(self.get_vehicle_lane_occupation(vehicle))
-                cluster_occupancy.append((vehicle_cluster, vehicle_lanes))
-                print(f"[DEBUG] Vehicle Cluster: {[vehicle.id for vehicle in vehicle_cluster]}")
 
             # Check each lane cluster for blockage
             for lane_cluster in lane_clusters_on_road:
-                for vehicle_cluster, vehicle_lanes in cluster_occupancy:
+                for vehicle_cluster in vehicle_clusters:
+                    # Collect all lanes occupied by vehicles in this cluster
+                    vehicle_lanes = set()
+                    for vehicle in vehicle_cluster:
+                        vehicle_lanes.update(self.get_vehicle_lane_occupation(vehicle))
+
+                    # Check if the vehicle cluster fully blocks the lane cluster
                     if lane_cluster.issubset(vehicle_lanes):
-                        print(f"[INFO] Road ID {road_id} is blocked.")
                         result["blocked"] = True
                         result["blocked_road_id"] = road_id
                         result["vehicles_on_blocked_road"] = list(vehicle_cluster)
+                        print(f"[INFO] Road ID {road_id} is blocked.")
                         print(f"[INFO] Vehicles on Blocked Road: {[vehicle.id for vehicle in vehicle_cluster]}")
                         return result
 
-        print("[INFO] No roads are blocked.")
         return result
 
     def solve_blockage(self, slow_vehicles, ego_vehicle: carla.Vehicle, throttle: float = 0.5, duration: float = 3.0):

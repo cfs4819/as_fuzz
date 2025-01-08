@@ -513,6 +513,7 @@ class Simulator(object):
         LANE_CHANGE
         STUCK
         ACCELERATION
+        ROAD_BLOCKED
     '''
         trigger_time = time.time()
         time_pass = trigger_time - \

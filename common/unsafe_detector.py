@@ -170,16 +170,16 @@ class UnsafeDetector(object):
             if road_blockage_result["blocked"]:
                 if start_block_time is None:
                     start_block_time = time.time()
-                print(f"unsafe:Road {road_blockage_result['blocked_road_id']} is blocked.")
                 if new_des_published and time.time() - start_block_time < 3.0:
                     # last block is releasing
                     time.sleep(0.5)
+                    print("unsafe:Road block is releasing")
                     continue
                 new_des_published = self.trigger_callbacks(
                     UNSAFE_TYPE.ROAD_BLOCKED,  # Or another suitable type
                     f"Road {road_blockage_result['blocked_road_id']} is blocked.",
                     road_blockage_result["vehicles_on_blocked_road"]
-                )
+                )[0]
             else:
                 if start_block_time:
                     # block has been released
@@ -286,9 +286,16 @@ class UnsafeDetector(object):
         del self.active_timers[uid]
 
     def trigger_callbacks(self, type, message, data=None):
-        # Call registered callback functions
+        """
+        Call registered callback functions and collect their return values.
+        """
+        results = []
         for callback in self.callbacks:
-            callback(type, message, data)
+            result = callback(type, message, data)
+            results.append(result)
+
+        return results
+
 
     def cleanup(self):
         # Clean up the sensors and stop all timers
