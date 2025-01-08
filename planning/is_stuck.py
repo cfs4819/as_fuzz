@@ -24,7 +24,7 @@ set_carla_api_path()
 import carla
 
 
-def is_vehicle_in_front(ego_vehicle, other_vehicle, distance_threshold=30.0) -> bool:
+def is_vehicle_in_front(ego_vehicle, other_vehicle, distance_threshold=10.0) -> bool:
     """
     Determines if another vehicle is in front of the ego vehicle.
 
