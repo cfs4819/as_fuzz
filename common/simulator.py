@@ -526,8 +526,9 @@ class Simulator(object):
             def condition_func(vehicle):
                 return is_vehicle_in_front(self.ego_vehicle, vehicle) and \
                     vehicle.get_velocity().length() < 1.0
-
-            return self.resolve_blockage(blocked_vehicles, condition_func)
+            handle_result = self.resolve_blockage(blocked_vehicles, condition_func)
+            self.on_unsafe_lock = False
+            return handle_result
 
         elif type == UNSAFE_TYPE.COLLISION:
             if time_pass > 5:
