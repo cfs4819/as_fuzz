@@ -525,7 +525,7 @@ class Simulator(object):
                     scenario_vehicle.end_loc = new_dest_loc
                     logger.info(f"[ACTION] New destination: {new_dest_loc}")
             else:
-                self.next_local_scenario.start()
+                self.next_local_scenario.scenario_start()
         return True
 
     def on_unsafe(self, type, message, data=None):
