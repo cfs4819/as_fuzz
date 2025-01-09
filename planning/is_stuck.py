@@ -23,15 +23,16 @@ def set_carla_api_path():
 set_carla_api_path()
 import carla
 
+import math
 
-def is_vehicle_in_front(ego_vehicle, other_vehicle, distance_threshold=10.0) -> bool:
+
+def _calculate_relative_position_and_distance(ego_vehicle, other_vehicle):
     """
-    Determines if another vehicle is in front of the ego vehicle.
+    Calculates the relative position and distance between the ego vehicle and another vehicle.
 
     :param ego_vehicle: Carla ego vehicle actor.
     :param other_vehicle: Carla other vehicle actor.
-    :param distance_threshold: Max distance to consider the vehicle as 'in front'.
-    :return: True if the other vehicle is in front, False otherwise.
+    :return: A tuple containing the relative position vector, the distance, and the ego vehicle's forward vector.
     """
     ego_transform = ego_vehicle.get_transform()
     other_transform = other_vehicle.get_transform()
@@ -41,13 +42,46 @@ def is_vehicle_in_front(ego_vehicle, other_vehicle, distance_threshold=10.0) -> 
     other_location = other_transform.location
     relative_position = other_location - ego_location
 
-    # Compute the dot product of relative position and ego vehicle's forward vector
+    # Compute the distance between vehicles
+    distance = math.sqrt(relative_position.x ** 2 + relative_position.y ** 2)
+
+    # Get the forward vector of the ego vehicle
     forward_vector = ego_transform.get_forward_vector()
+
+    return relative_position, distance, forward_vector
+
+
+def is_vehicle_in_front(ego_vehicle, other_vehicle, distance_threshold=30.0) -> bool:
+    """
+    Determines if another vehicle is in front of the ego vehicle.
+
+    :param ego_vehicle: Carla ego vehicle actor.
+    :param other_vehicle: Carla other vehicle actor.
+    :param distance_threshold: Max distance to consider the vehicle as 'in front'.
+    :return: True if the other vehicle is in front, False otherwise.
+    """
+    relative_position, distance, forward_vector = _calculate_relative_position_and_distance(ego_vehicle, other_vehicle)
+
+    # Compute the dot product of relative position and ego vehicle's forward vector
     dot_product = forward_vector.x * relative_position.x + forward_vector.y * relative_position.y
 
     # Check if the other vehicle is within the distance threshold and in front
-    distance = math.sqrt(relative_position.x ** 2 + relative_position.y ** 2)
     return dot_product > 0 and distance <= distance_threshold
+
+
+def is_vehicle_around(ego_vehicle, other_vehicle, distance_threshold=5.0) -> bool:
+    """
+    Determines if another vehicle is around the ego vehicle.
+
+    :param ego_vehicle: Carla ego vehicle actor.
+    :param other_vehicle: Carla other vehicle actor.
+    :param distance_threshold: Max distance to consider the vehicle as 'around'.
+    :return: True if the other vehicle is around, False otherwise.
+    """
+    _, distance, _ = _calculate_relative_position_and_distance(ego_vehicle, other_vehicle)
+
+    # Check if the other vehicle is within the distance threshold
+    return distance <= distance_threshold
 
 
 # Function to calculate distance between two vehicles
@@ -115,22 +149,6 @@ def resolve_stuck_vehicles(vehicles: List[carla.Actor], condition_func, throttle
 
     print(f"[ACTION] Resetting control for vehicle ID: {vehicle_to_resolve.id}")
     vehicle_to_resolve.apply_control(carla.VehicleControl(throttle=0.0, brake=0.0))
-
-
-def resolve_intersection_stuck(vehicles: List[carla.Actor], throttle: float = 0.5, duration: float = 3.0):
-    """
-    Resolves vehicles stuck at intersections by applying throttle to vehicles
-    stopped for too long and with no vehicles in front.
-    """
-
-    def condition(vehicle):
-        # Vehicle is stopped and no vehicles are in front
-        speed = vehicle.get_velocity().length()
-        is_in_front = any(is_vehicle_in_front(vehicle, other_vehicle) for other_vehicle in vehicles if
-                          other_vehicle.id != vehicle.id)
-        return speed < 0.5 and not is_in_front
-
-    resolve_stuck_vehicles(vehicles, condition, throttle, duration)
 
 
 class RoadBlockageChecker:

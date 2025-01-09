@@ -5,7 +5,8 @@ import time
 # from enum import Enum
 from threading import Thread, Lock, Event
 
-from planning.is_stuck import RoadBlockageChecker
+from planning.is_stuck import RoadBlockageChecker, is_vehicle_in_front, resolve_stuck_vehicles, is_vehicle_accelerating, \
+    is_vehicle_around
 
 
 class UNSAFE_TYPE():
@@ -71,7 +72,12 @@ class UnsafeDetector(object):
         ]
         if self.vehicle in slow_vehicles:
             slow_vehicles.remove(self.vehicle)
-        return self.road_blockage_checker.is_road_blocked(slow_vehicles, self.distance_threshold)
+
+        slow_vehicles_in_front = []
+        for slow_vehicle in slow_vehicles:
+            if is_vehicle_in_front(self.vehicle, slow_vehicle) or is_vehicle_around(self.vehicle, slow_vehicle):
+                slow_vehicles_in_front.append(slow_vehicle)
+        return self.road_blockage_checker.is_road_blocked(slow_vehicles_in_front, self.distance_threshold)
 
     def init_sensors(self):
         # Setup the lane invasion and collision sensors
@@ -163,32 +169,59 @@ class UnsafeDetector(object):
             self.road_blockage_thread.join()
 
     def monitor_road_blockage(self):
-        """Thread for monitoring road blockage."""
-        start_block_time = None
-        new_des_published = False
+        """
+        Thread for monitoring road blockage.
+        - Detects road blockage and triggers callbacks.
+        - Ensures a 3-second gap between consecutive blockage detections.
+        - Records total blockage time.
+        """
+        blockage_start_time = None  # Timestamp when blockage is detected
+        last_resolve_time = None  # Timestamp when blockage is last resolved
+        callback_triggered = False  # Whether a callback has been triggered
+
         while not self.road_blockage_event.is_set():
-            # Implement road blockage detection
             road_blockage_result = self.is_road_blocked()
+
             if road_blockage_result["blocked"]:
-                if start_block_time is None:
-                    start_block_time = time.time()
-                if new_des_published and time.time() - start_block_time < 3.0:
-                    # last block is releasing
-                    time.sleep(0.5)
-                    print("unsafe:Road block is releasing")
-                    continue
-                new_des_published = self.trigger_callbacks(
-                    UNSAFE_TYPE.ROAD_BLOCKED,  # Or another suitable type
+                # Blockage detected
+                if blockage_start_time is None:
+                    blockage_start_time = time.time()
+                    last_resolve_time = time.time()
+
+                if callback_triggered:
+                    elapsed_since_resolve = time.time() - last_resolve_time
+                    if elapsed_since_resolve < 3.0:
+                        # Wait for the previous blockage to fully resolve
+                        time.sleep(0.5)
+                        continue
+                    else:
+                        # Reset resolve time for new blockage handling
+                        last_resolve_time = time.time()
+                    if time.time() - blockage_start_time >= 15.0:
+                        def condition(vehicle):
+                            # The Vehicle is in front of ego and not speeding up
+                            return is_vehicle_in_front(self.vehicle,
+                                                       vehicle) and vehicle.get_velocity().length() < 1.0 and not is_vehicle_accelerating(
+                                vehicle)
+                        # Blockage has persisted for too long
+                        resolve_stuck_vehicles(road_blockage_result["vehicles_on_blocked_road"], condition, 0.5, 3)
+
+                # Trigger callback for road blockage
+                callback_triggered = self.trigger_callbacks(
+                    UNSAFE_TYPE.ROAD_BLOCKED,
                     f"Road {road_blockage_result['blocked_road_id']} is blocked.",
                     road_blockage_result["vehicles_on_blocked_road"]
                 )[0]
+
             else:
-                if start_block_time:
-                    # block has been released
-                    self.total_block_time += time.time() - start_block_time
-                    start_block_time = None
-                    new_des_published = False
-            time.sleep(0.5)  # Perform check every second
+                # Blockage resolved
+                if blockage_start_time is not None:
+                    # Update total blockage time
+                    self.total_block_time += time.time() - blockage_start_time
+                    blockage_start_time = None
+                    callback_triggered = False
+
+            time.sleep(0.5)  # Perform check every 0.5 seconds
 
     def on_collision(self, event):
         # Handle collision events

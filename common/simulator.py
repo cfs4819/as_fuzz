@@ -498,14 +498,15 @@ class Simulator(object):
             new_dest = self.select_valid_dest(
                 min_radius=100, max_radius=9999)
             new_dest_loc = new_dest.location
-
-            scenario_vehicle.agent.set_destination(new_dest_loc)
-            scenario_vehicle.end_loc = new_dest_loc
-            logger.info(f"[ACTION] New destination: {new_dest_loc}")
+            # change for robust
+            if scenario_vehicle.agent:
+                scenario_vehicle.agent.set_destination(new_dest_loc)
+                scenario_vehicle.end_loc = new_dest_loc
+                logger.info(f"[ACTION] New destination: {new_dest_loc}")
         else:
             # check next scenario
             if not self.next_local_scenario:
-                return False            
+                return False
             if self.next_local_scenario.running:
                 # set new dest
                 for NPC_v in self.next_local_scenario.npc_vehicle_list:
@@ -520,10 +521,11 @@ class Simulator(object):
                     new_dest = self.select_valid_dest(
                         min_radius=100, max_radius=9999)
                     new_dest_loc = new_dest.location
-
-                    scenario_vehicle.agent.set_destination(new_dest_loc)
-                    scenario_vehicle.end_loc = new_dest_loc
-                    logger.info(f"[ACTION] New destination: {new_dest_loc}")
+                    # change for robust
+                    if scenario_vehicle.agent:
+                        scenario_vehicle.agent.set_destination(new_dest_loc)
+                        scenario_vehicle.end_loc = new_dest_loc
+                        logger.info(f"[ACTION] New destination: {new_dest_loc}")
             else:
                 self.next_local_scenario.scenario_start()
         return True

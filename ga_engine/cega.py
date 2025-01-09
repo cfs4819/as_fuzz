@@ -139,14 +139,15 @@ class CEGA:
             self.junction_dir_num = int(
                 str_seg[2]) if str_seg[2] != '-1' else 3
 
+            # change for block *2
             if self.junction_size == 'small':
-                self.ind_vehicle_max_count = 3
+                self.ind_vehicle_max_count = 3 * 2
                 self.ind_walker_max_count = 4
             elif self.junction_size == 'medium':
-                self.ind_vehicle_max_count = 4
+                self.ind_vehicle_max_count = 4 * 2
                 self.ind_walker_max_count = 5
             elif self.junction_size == 'large':
-                self.ind_vehicle_max_count = 5
+                self.ind_vehicle_max_count = 5 * 2
                 self.ind_walker_max_count = 6
 
         elif str_seg[0] == 'straight':
@@ -155,7 +156,7 @@ class CEGA:
             self.way_num = int(str_seg[1]) if str_seg[1] != '-1' else 2
             self.lane_num = int(str_seg[3]) if str_seg[3] != '-1' else 2
 
-            self.ind_vehicle_max_count = 1.5 * self.lane_num
+            self.ind_vehicle_max_count = 1.5 * self.lane_num * 2
 
     def mate_walkers(self, ind1: GeneNpcWalkerList, ind2: GeneNpcWalkerList):
         offspring1 = GeneNpcWalkerList(max_count=self.ind_walker_max_count)

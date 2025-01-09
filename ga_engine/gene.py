@@ -72,8 +72,8 @@ class GeneNpcWalkerList:
         new_walker = GeneNpcWalker()
         new_walker.start = {'x': start_x, 'y': start_y, 'z': 0}
         new_walker.end = {'x': end_x, 'y': end_y, 'z': 0}
-
-        new_walker.start_time = random.uniform(0, 2)
+        # change from 2 to 10
+        new_walker.start_time = random.uniform(0, 10)
 
         new_walker.status = random.choices([0, 1],
                                            weights=[0.7, 0.3], k=1)[0]
@@ -105,8 +105,8 @@ class GeneNpcVehicleList:
 
         new_vehicle.start = {'x': start_x, 'y': start_y, 'z': 0}
         new_vehicle.end = {'x': end_x, 'y': end_y, 'z': 0}
-
-        new_vehicle.start_time = random.uniform(0, 1)
+        # change from 1 to 5
+        new_vehicle.start_time = random.uniform(0, 5)
 
         new_vehicle.vehicle_type = random.choices([0, 1, 2, 3],
                                                   weights=[0.4, 0.3, 0.2, 0.1], k=1)[0]

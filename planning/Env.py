@@ -57,7 +57,15 @@ class Env:
         self.resolution = resolution
         self.safety_distance = safety_distance
 
+        x_min, y_min, x_max, y_max = bounds
+        self.x_range = (x_min, x_max)
+        self.y_range = (y_min, y_max)
+        self.motions = [(-resolution, 0), (-resolution, resolution), (0, resolution), (resolution, resolution),
+                        (resolution, 0), (resolution, -resolution), (0, -resolution), (-resolution, -resolution)]
+
         self.lane_grid = set()  # Grid cells representing lanes
+        self.safe_grid = set()  # Grid cells for safety distance
+
         self.obs = set()  # Grid cells representing obstacles (expanded by safety distance)
 
         self.update_lanes()  # Initialize lane grid
@@ -111,8 +119,8 @@ class Env:
         """
         target_road_id = waypoint.road_id  # Get the road ID of the given waypoint
         target_lane_id = waypoint.lane_id  # Get the lane ID of the given waypoint
-        print(f"Processing Lane: Road ID {target_road_id}, Lane ID {target_lane_id}")
         map_waypoints = self.map_waypoints
+
         # Filter all waypoints that belong to the same road and lane ID
         lane_waypoints = [
             wp for wp in map_waypoints
@@ -124,6 +132,7 @@ class Env:
             return
 
         temp_lane_grid = set()  # Temporary storage for the points in this lane
+        temp_safe_grid = set()  # Temporary storage for the safety points in this lane
 
         for current_waypoint in lane_waypoints:
             transform = current_waypoint.transform
@@ -142,8 +151,7 @@ class Env:
             half_width = lane_width / 2.0
             half_length = lane_length / 2.0
 
-            # Generate grid points in the local coordinate system
-            grid_points_count = 0
+            # Generate grid points in the local coordinate system for the lane grid
             for x_local in np.arange(-half_length, half_length, self.resolution):
                 for y_local in np.arange(-half_width, half_width, self.resolution):
                     # Transform local coordinates to global coordinates
@@ -152,62 +160,41 @@ class Env:
 
                     # Add the global point to the temporary lane grid
                     temp_lane_grid.add((int(x_global), int(y_global)))
-                    grid_points_count += 1
 
-            # Debug information
-            print(f"Processed Waypoint at ({location.x:.2f}, {location.y:.2f}):")
-            print(f"  Grid Points Processed in this Rectangle: {grid_points_count}")
-            print(f"  Temporary Lane Grid Total Size: {len(temp_lane_grid)}\n")
+            # Extend safety grid on both sides of the lane
+            safe_half_width = half_width + self.safety_distance  # Extend by safety distance
+            for x_local in np.arange(-half_length, half_length, self.resolution):
+                for y_local in np.arange(-safe_half_width, -half_width, self.resolution):
+                    # Transform to global coordinates for left side
+                    x_global = location.x + x_local * cos_yaw - y_local * sin_yaw
+                    y_global = location.y + x_local * sin_yaw + y_local * cos_yaw
+                    temp_safe_grid.add((int(x_global), int(y_global)))
 
-        # Update the main lane grid with the points from this lane
+                for y_local in np.arange(half_width, safe_half_width, self.resolution):
+                    # Transform to global coordinates for right side
+                    x_global = location.x + x_local * cos_yaw - y_local * sin_yaw
+                    y_global = location.y + x_local * sin_yaw + y_local * cos_yaw
+                    temp_safe_grid.add((int(x_global), int(y_global)))
+
+        # Update the main lane grid and safe grid
         self.lane_grid.update(temp_lane_grid)
-        print(f"Added {len(temp_lane_grid)} points to the main lane grid.")
+        self.safe_grid.update(temp_safe_grid)
 
     def update_obs(self):
         """
         Update obstacle occupancy grid based on obstacle positions and safety distance.
         """
         self.obs.clear()
-
+        self.safe_grid.clear()
         for obstacle in self.obstacles:
             bounding_box = obstacle.bounding_box
             location = obstacle.get_location()
 
             # Expand obstacle bounding box by the safety distance
-            obs_cells = self.bounding_box_to_grid(bounding_box, location, self.safety_distance)
+            obs_cells = bounding_box_to_grid(bounding_box, location, self.safety_distance)
             self.obs.update(obs_cells)
-
-    def bounding_box_to_grid(self, bounding_box, location, safety_distance):
-        """
-        Convert a bounding box to occupied grid cells, considering a spherical safety distance.
-
-        :param bounding_box: Carla bounding box object
-        :param location: Location of the bounding box
-        :param safety_distance: Distance to expand around the bounding box (spherical expansion)
-        :return: Set of occupied grid cells
-        """
-        obs_cells = set()
-        box_extent = bounding_box.extent
-
-        # Calculate the effective radius of the expanded bounding box
-        effective_radius = max(box_extent.x, box_extent.y) + safety_distance
-
-        # Define the bounding box limits for grid generation
-        x_min = location.x - effective_radius
-        x_max = location.x + effective_radius
-        y_min = location.y - effective_radius
-        y_max = location.y + effective_radius
-
-        # Generate grid points within the bounding box limits
-        for x in np.arange(x_min, x_max, self.resolution):
-            for y in np.arange(y_min, y_max, self.resolution):
-                # Calculate distance from the center of the bounding box to the grid point
-                distance = ((x - location.x) ** 2 + (y - location.y) ** 2) ** 0.5
-                # Check if the grid point lies within the spherical region
-                if distance <= effective_radius:
-                    obs_cells.add((int(x), int(y)))
-
-        return obs_cells
+            safe_cells = expand_grid_with_safety_distance(obs_cells, location, self.safety_distance, self.resolution)
+            self.safe_grid.update(safe_cells)
 
     def is_occupied(self, x, y):
         """
@@ -217,7 +204,7 @@ class Env:
         :param y: Y-coordinate of the grid cell
         :return: True if occupied, False otherwise
         """
-        return (x, y) in self.obs or (x, y) not in self.lane_grid
+        return (x, y) in self.obs or (x, y) in self.safe_grid or (x, y) not in self.lane_grid
 
     def to_grid(self, location):
         """
@@ -227,6 +214,7 @@ class Env:
         :return: (x, y) grid coordinates
         """
         return int(location.x / self.resolution), int(location.y / self.resolution)
+
 
 def save_grid(lane_grid, obs_grid, ego_location, target_location, filename="grid_visualization.png"):
     """
@@ -402,8 +390,67 @@ def main():
             break
 
 
+def bounding_box_to_grid(bounding_box, location, resolution):
+    """
+    Convert a bounding box to grid cells.
+
+    :param bounding_box: Carla bounding box object
+    :param location: Location of the bounding box
+    :param resolution: Grid resolution (size of each grid cell in meters)
+    :return: Set of grid cells representing the bounding box
+    """
+    grid_cells = set()
+    box_extent = bounding_box.extent
+
+    # Define the bounding box limits
+    x_min = location.x - box_extent.x
+    x_max = location.x + box_extent.x
+    y_min = location.y - box_extent.y
+    y_max = location.y + box_extent.y
+
+    # Generate grid points within the bounding box limits
+    for x in np.arange(x_min, x_max, resolution):
+        for y in np.arange(y_min, y_max, resolution):
+            grid_cells.add((int(x), int(y)))
+
+    return grid_cells
+
+
+def expand_grid_with_safety_distance(bounding_box_grid, location, safety_distance, resolution):
+    """
+    Generate grid cells representing the safety distance around the bounding box, excluding the bounding box cells.
+
+    :param bounding_box_grid: Set of grid cells from the bounding box
+    :param location: Center location for the expansion
+    :param safety_distance: Safety distance to expand around the grid cells
+    :param resolution: Grid resolution (size of each grid cell in meters)
+    :return: Set of grid cells representing only the safety distance
+    """
+    expanded_cells = set()
+    effective_radius = safety_distance
+
+    # Define the bounding box limits for expansion
+    x_min = location.x - effective_radius
+    x_max = location.x + effective_radius
+    y_min = location.y - effective_radius
+    y_max = location.y + effective_radius
+
+    # Generate additional grid points within the safety distance
+    for x in np.arange(x_min, x_max, resolution):
+        for y in np.arange(y_min, y_max, resolution):
+            distance = ((x - location.x) ** 2 + (y - location.y) ** 2) ** 0.5
+            if distance <= effective_radius:
+                cell = (int(x), int(y))
+                # Exclude the cells that are part of the bounding box grid
+                if cell not in bounding_box_grid:
+                    expanded_cells.add(cell)
+
+    return expanded_cells
+
+
 if __name__ == "__main__":
     from cyber.python.cyber_py3 import cyber
+
     try:
         main()
     except KeyboardInterrupt:
