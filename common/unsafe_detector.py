@@ -228,7 +228,7 @@ class UnsafeDetector(object):
             if not road_blockage_result["blocked"]:
                 # Blockage resolved
                 if blockage_start_time is not None:
-                    self.total_block_time += time.time() - blockage_start_time
+                    # self.total_block_time += time.time() - blockage_start_time
                     blockage_start_time = None
                 callback_triggered = False
                 last_calc_time = time.time()  # Reset last_calc_time for accurate tracking
