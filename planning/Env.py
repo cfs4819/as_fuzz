@@ -34,7 +34,7 @@ import carla
 
 
 class Env:
-    def __init__(self, world, bounds, obstacles, map, waypoints, target_waypoint, resolution=1.0, safety_distance=1.0):
+    def __init__(self, world, bounds, obstacles, map, waypoints, resolution, safety_distance):
         """
         Initialize the environment for Carla simulation.
 
@@ -43,7 +43,6 @@ class Env:
         :param obstacles: List of Carla Actor objects representing obstacles
         :param map: Carla map object
         :param waypoints: List of Carla waypoint objects
-        :param target_waypoint: Target waypoint for planning
         :param resolution: Grid resolution (size of each grid cell in meters)
         :param safety_distance: Safety distance to expand around obstacles
         """
@@ -53,15 +52,14 @@ class Env:
         self.map = map
         self.map_waypoints = map.generate_waypoints(distance=resolution)
         self.waypoints = waypoints
-        self.target_waypoint = target_waypoint
         self.resolution = resolution
         self.safety_distance = safety_distance
 
         x_min, y_min, x_max, y_max = bounds
         self.x_range = (x_min, x_max)
         self.y_range = (y_min, y_max)
-        self.motions = [(-resolution, 0), (-resolution, resolution), (0, resolution), (resolution, resolution),
-                        (resolution, 0), (resolution, -resolution), (0, -resolution), (-resolution, -resolution)]
+        self.motions = [(-1, 0), (-1, 1), (0, 1), (1, 1),
+                        (1, 0), (1, -1), (0, -1), (-1, -1)]
 
         self.lane_grid = set()  # Grid cells representing lanes
         self.safe_grid_lane = set()  # Grid cells for safety distance
@@ -83,6 +81,14 @@ class Env:
             # Recursively add lanes to the left and right
             self.recursively_add_lanes(waypoint, direction="left")
             self.recursively_add_lanes(waypoint, direction="right")
+            # Compute inner lane grid and safe boundary grid
+
+        inner_lane_grid, safe_boundary_grid = compute_inner_safe_grid(self.lane_grid, self.resolution,
+                                                                      self.safety_distance)
+
+        # Update the safe grid and lane grid
+        self.safe_grid_lane = safe_boundary_grid
+        self.lane_grid = inner_lane_grid
 
     def add_lane_cells(self, waypoint):
         """
@@ -98,75 +104,20 @@ class Env:
             wp for wp in map_waypoints
             if wp.road_id == target_road_id and wp.lane_id == target_lane_id
         ]
-
         if not lane_waypoints:
             print(f"[WARNING] No waypoints found for Road ID {target_road_id}, Lane ID {target_lane_id}.")
             return
 
-        temp_lane_grid = set()  # Temporary storage for lane grid points
-        temp_safe_grid = set()  # Temporary storage for safety grid points
+        # Generate lane points (entire lane)
+        lane_points = generate_lane_points(lane_waypoints, self.resolution)
 
-        for waypoint in lane_waypoints:
-            transform = waypoint.transform
-            location = transform.location
-            lane_width = waypoint.lane_width
-            yaw = math.radians(transform.rotation.yaw)
-
-            # Check lane change ability and determine where to add safe grid
-            lane_change = waypoint.lane_change
-
-            # Get the left and right lanes
-            left_lane = waypoint.get_left_lane()
-            right_lane = waypoint.get_right_lane()
-
-            # Check for ID jump for left and right lanes
-            left_id_jump = (left_lane is not None and left_lane.lane_id * waypoint.lane_id <= 0) or (left_lane is not None and abs(left_lane.lane_id - waypoint.lane_id) > 1)
-            right_id_jump = (right_lane is not None and right_lane.lane_id * waypoint.lane_id <= 0) or (right_lane is not None and abs(right_lane.lane_id - waypoint.lane_id) > 1)
-
-            # Determine whether to add safe grid on the left
-            add_left_safe_grid = (
-                (lane_change in [carla.LaneChange.NONE, carla.LaneChange.Right])  # Left change not allowed
-                or left_lane is None  # No left lane
-                or left_id_jump  # ID jump detected
-                or (left_lane.lane_type != carla.LaneType.Driving)  # Left lane not drivable
-            )
-
-            # Determine whether to add safe grid on the right
-            add_right_safe_grid = (
-                (lane_change in [carla.LaneChange.NONE, carla.LaneChange.Left])  # Right change not allowed
-                or right_lane is None  # No right lane
-                or right_id_jump  # ID jump detected
-                or (right_lane.lane_type != carla.LaneType.Driving)  # Right lane not drivable
-            )
-
-            # Calculate half-width and rotation matrix
-            half_width = lane_width / 2.0
-            cos_yaw = math.cos(yaw)
-            sin_yaw = math.sin(yaw)
-
-            # Extend the lane grid and mark edges as safe grid
-            for y_offset in np.arange(-half_width - self.safety_distance, half_width + self.safety_distance,
-                                      self.resolution):
-                # Determine if the current offset is on a safe edge
-                is_left_edge = y_offset < -half_width
-                is_right_edge = y_offset > half_width
-                is_safe_edge = (is_left_edge and add_left_safe_grid) or (is_right_edge and add_right_safe_grid)
-
-                for x_offset in np.arange(-self.resolution * 3, self.resolution * 3,
-                                          self.resolution):  # Lane segment length
-                    # Transform local coordinates to global
-                    x_global = location.x + x_offset * cos_yaw - y_offset * sin_yaw
-                    y_global = location.y + x_offset * sin_yaw + y_offset * cos_yaw
-                    grid_point = to_grid(carla.Location(x=x_global, y=y_global), resolution=self.resolution)
-
-                    # Add to lane grid
-                    temp_lane_grid.add(grid_point)
-                    if is_safe_edge:
-                        temp_safe_grid.add(grid_point)
-
+        # Add all lane points to the grid
+        temp_lane_grid = set()
+        for point in lane_points:
+            grid_point = to_grid(point, self.resolution)
+            temp_lane_grid.add(grid_point)
         # Update the main lane grid and safe grid
         self.lane_grid.update(temp_lane_grid)
-        self.safe_grid_lane.update(temp_safe_grid)
 
     def update_obs(self):
         """
@@ -175,11 +126,9 @@ class Env:
         self.obs.clear()
         self.safe_grid_obs.clear()
         for obstacle in self.obstacles:
-            bounding_box = obstacle.bounding_box
-            location = obstacle.get_location()
 
             # Expand obstacle bounding box by the safety distance
-            obs_cells = bounding_box_to_grid(bounding_box, location, self.safety_distance)
+            obs_cells = bounding_box_to_grid(obstacle, self.resolution)
             self.obs.update(obs_cells)
             safe_cells = expand_grid_with_safety_distance(obs_cells, self.safety_distance // self.resolution)
             self.safe_grid_obs.update(safe_cells)
@@ -213,225 +162,160 @@ class Env:
         else:
             raise ValueError("Direction must be 'left' or 'right'.")
 
-        current_lane_id = waypoint.lane_id
+        lane = waypoint
 
         while True:
-            next_lane = get_lane_func()
-            if not next_lane:
-                print(f"[INFO] No more lanes to the {direction}.")
+            if not lane:
+                # print(f"[INFO] No more lanes to the {direction}.")
                 break
 
             # Stop if lane change is not allowed
-            if next_lane.lane_change not in valid_lane_changes:
-                print(f"[INFO] Lane change not allowed to the {direction}.")
+            if lane.lane_change not in valid_lane_changes:
+                # print(f"[INFO] Lane change not allowed to the {direction}.")
                 break
-
-            # Stop if lane ID changes abruptly
-            if abs(next_lane.lane_id - current_lane_id) > 1:
-                print(f"[INFO] Lane ID jump detected to the {direction}: {next_lane.lane_id}")
+            lane = get_lane_func()
+            if not lane:
                 break
-
             # Add the lane to the grid
-            self.add_lane_cells(next_lane)
-            print(f"[INFO] Added lane {next_lane.lane_id} to the {direction}.")
-
-            # Update the current waypoint and lane ID
-            current_lane_id = next_lane.lane_id
+            self.add_lane_cells(lane)
+            print(f"[INFO] Added lane {lane.lane_id} to the {direction}.")
 
 
-def save_grid(lane_grid, obs_grid, ego_location, target_location, filename="grid_visualization.png"):
+def bounding_box_to_grid(obstacle, resolution):
     """
-    Save the grid visualization showing lanes and obstacles to a file.
-
-    :param lane_grid: Set of grid points representing lanes.
-    :param obs_grid: Set of grid points representing obstacles.
-    :param ego_location: Tuple (x, y) of the ego vehicle's location.
-    :param target_location: Tuple (x, y) of the target's location.
-    :param filename: Filename to save the visualization (default: "grid_visualization.png").
-    """
-    plt.figure(figsize=(10, 10))
-    lane_x, lane_y = zip(*lane_grid) if lane_grid else ([], [])
-    obs_x, obs_y = zip(*obs_grid) if obs_grid else ([], [])
-
-    plt.scatter(lane_x, lane_y, c='blue', s=5, label='Lanes')
-    plt.scatter(obs_x, obs_y, c='red', s=5, label='Obstacles')
-    plt.scatter([ego_location[0]], [ego_location[1]], c='green', s=100, label='Ego Vehicle')
-    plt.scatter([target_location[0]], [target_location[1]], c='orange', s=100, label='Target')
-
-    plt.legend()
-    plt.xlabel('X')
-    plt.ylabel('Y')
-    plt.title('Grid Visualization')
-    plt.grid()
-
-    # Save the figure to the specified file
-    plt.savefig(filename)
-    print(f"Grid visualization saved to {filename}.")
-    plt.close()  # Close the plot to free up memory
-
-
-# def main():
-#     from cyber.python.cyber_py3 import cyber
-#     from loguru import logger
-#     """
-#     Main function to continuously update and save grid visualization with Carla.
-#     """
-#     client = carla.Client('localhost', 4000)
-#     client.set_timeout(10.0)
-#     world = client.get_world()
-#
-#     # Get map and initial waypoints
-#     carla_map = world.get_map()
-#
-#     # Initialize Apollo Cyber RT
-#     cyber.init()
-#     logger.info("Apollo Cyber RT initialized.")
-#
-#     # Find Ego vehicle with retry mechanism
-#     max_retries = 5
-#     retry_interval = 2  # seconds
-#     resolution = 0.5
-#     ego_vehicle = None
-#
-#     for attempt in range(max_retries):
-#         print(f"[INFO] Attempting to find ego vehicle (Attempt {attempt + 1}/{max_retries})...")
-#         for vehicle in world.get_actors().filter('vehicle.*'):
-#             if "vehicle.lincoln.mkz_2017" in vehicle.type_id:
-#                 ego_vehicle = vehicle
-#                 print("[INFO] Ego vehicle found.")
-#                 break
-#         if ego_vehicle:
-#             break
-#         else:
-#             print(f"[WARNING] Ego vehicle not found. Retrying in {retry_interval} seconds...")
-#             time.sleep(retry_interval)
-#
-#     if not ego_vehicle:
-#         print("[ERROR] Failed to find vehicle.lincoln.mkz_2017 after multiple attempts.")
-#         return
-#
-#     # Initialize Apollo Routing Listener
-#     apollo_listener = ApolloRoutingListener(carla_world=world, ego_vehicle=ego_vehicle, debug=True)
-#     apollo_listener.start("routing_test_node")
-#
-#     def signal_handler(sig, frame):
-#         """Handle Ctrl+C to gracefully exit."""
-#         print("\n[INFO] Ctrl+C detected. Shutting down...")
-#         apollo_listener.stop()
-#         cyber.shutdown()
-#         sys.exit(0)
-#
-#     # Register the signal handler
-#     signal.signal(signal.SIGINT, signal_handler)
-#
-#     print("Waiting for routing response...")
-#     while not apollo_listener.routing_wps:
-#         time.sleep(0.5)
-#
-#     print("Routing response received. Starting visualization loop...")
-#
-#     while True:
-#         try:
-#             # Check if ego vehicle still exists
-#             if ego_vehicle is None or ego_vehicle not in world.get_actors():
-#                 print("[WARNING] Ego vehicle is missing. Attempting to reacquire...")
-#                 ego_vehicle = None
-#                 for vehicle in world.get_actors().filter('vehicle.*'):
-#                     if "vehicle.lincoln.mkz_2017" in vehicle.type_id:
-#                         ego_vehicle = vehicle
-#                         print("[INFO] Ego vehicle reacquired.")
-#                         break
-#                 if ego_vehicle is None:
-#                     print("[ERROR] Ego vehicle could not be reacquired. Exiting loop.")
-#                     break
-#
-#             # Get ego vehicle location
-#             retry_attempts = 3
-#             for attempt in range(retry_attempts):
-#                 ego_location = ego_vehicle.get_location()
-#                 if ego_location.x != 0 or ego_location.y != 0:
-#                     break
-#                 print(f"[WARNING] Ego vehicle location returned (0, 0). Retrying... ({attempt + 1}/{retry_attempts})")
-#                 time.sleep(0.5)
-#             else:
-#                 print("[ERROR] Ego vehicle location invalid after retries. Exiting loop.")
-#                 break
-#
-#             ego_bounding_box = ego_vehicle.bounding_box
-#             vehicle_transform = ego_vehicle.get_transform()
-#
-#             # Update routing waypoints
-#             routing_waypoints = apollo_listener.routing_wps
-#
-#             # Update obstacles
-#             obstacles = [
-#                 actor for actor in world.get_actors()
-#                 if (('vehicle' in actor.type_id) and actor.id != ego_vehicle.id)
-#             ]
-#
-#             # Use bounding box corners to calculate lane occupation
-#             bbox_vertices = ego_bounding_box.get_world_vertices(vehicle_transform)
-#             ego_waypoints = []
-#             for vertex in bbox_vertices:
-#                 ego_waypoints.append(
-#                     carla_map.get_waypoint(vertex, project_to_road=True, lane_type=carla.LaneType.Driving))
-#             ego_grid = to_grid(ego_location, resolution=resolution)
-#             # Update target location
-#             if routing_waypoints and routing_waypoints[-1]:
-#                 target_waypoint = routing_waypoints[-1][-1]
-#                 target_location = target_waypoint.transform.location
-#                 target_grid = to_grid(target_location, resolution=resolution)
-#             else:
-#                 print("[ERROR] No valid target waypoint found. Exiting loop.")
-#                 break
-#
-#             # Update waypoints for the environment
-#             waypoints = [waypoints_e[0] for waypoints_e in routing_waypoints if waypoints_e[0]]
-#
-#
-#
-#             # Set the expanded bounds
-#             bounds = (x_min, y_min, x_max, y_max)
-#             # Initialize environment
-#             env = Env(world, bounds, obstacles, carla_map, waypoints, target_waypoint, resolution=resolution,
-#                       safety_distance=0.5)
-#
-#             # Save the grid visualization, overwriting the same file
-#             filename = "grid_visualization.png"
-#             save_grid(env.lane_grid, env.obs, ego_grid, target_grid, filename=filename)
-#             print(f"[INFO] Saved updated grid visualization to {filename}")
-#
-#             time.sleep(1)  # Adjust the update interval as needed
-#
-#         except Exception as e:
-#             print(f"[ERROR] Exception occurred during main loop: {e}")
-#             break
-
-
-def bounding_box_to_grid(bounding_box, location, resolution):
-    """
-    Convert a bounding box to grid cells.
-
-    :param bounding_box: Carla bounding box object
-    :param location: Location of the bounding box
+    Convert a bounding box to grid cells while considering the obstacle's position and orientation.
+    :param obstacle: Carla Actor object representing the obstacle
     :param resolution: Grid resolution (size of each grid cell in meters)
     :return: Set of grid cells representing the bounding box
     """
+    bounding_box = obstacle.bounding_box
+    location = obstacle.get_location()
+    rotation = obstacle.get_transform().rotation  # Get the obstacle's rotation
     grid_cells = set()
     box_extent = bounding_box.extent
 
-    # Define the bounding box limits
-    x_min = location.x - box_extent.x
-    x_max = location.x + box_extent.x
-    y_min = location.y - box_extent.y
-    y_max = location.y + box_extent.y
+    # Precompute sine and cosine of yaw for rotation
+    yaw = math.radians(rotation.yaw)
+    cos_yaw = math.cos(yaw)
+    sin_yaw = math.sin(yaw)
 
-    # Generate grid points within the bounding box limits
+    # Generate corner points of the bounding box in local space
+    corners = [
+        carla.Location(x=-box_extent.x, y=-box_extent.y),
+        carla.Location(x=-box_extent.x, y=box_extent.y),
+        carla.Location(x=box_extent.x, y=-box_extent.y),
+        carla.Location(x=box_extent.x, y=box_extent.y)
+    ]
+
+    # Transform the corners to global space
+    global_corners = []
+    for corner in corners:
+        # Apply rotation
+        rotated_x = corner.x * cos_yaw - corner.y * sin_yaw
+        rotated_y = corner.x * sin_yaw + corner.y * cos_yaw
+
+        # Translate to the obstacle's global position
+        global_x = rotated_x + location.x
+        global_y = rotated_y + location.y
+
+        global_corners.append((global_x, global_y))
+
+    # Determine the bounding box limits in global space
+    x_min = min(c[0] for c in global_corners)
+    x_max = max(c[0] for c in global_corners)
+    y_min = min(c[1] for c in global_corners)
+    y_max = max(c[1] for c in global_corners)
+
+    # Generate grid points within the transformed bounding box limits
     for x in np.arange(x_min, x_max, resolution):
         for y in np.arange(y_min, y_max, resolution):
-            grid_cells.add(to_grid(carla.Location(x=x, y=y), resolution))
+            # Transform the grid point back to local space to check if it is inside the bounding box
+            local_x = (x - location.x) * cos_yaw + (y - location.y) * sin_yaw
+            local_y = -(x - location.x) * sin_yaw + (y - location.y) * cos_yaw
+
+            if -box_extent.x <= local_x <= box_extent.x and -box_extent.y <= local_y <= box_extent.y:
+                grid_cells.add(to_grid(carla.Location(x=x, y=y), resolution))
 
     return grid_cells
+
+
+class Point:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+
+def generate_lane_points(lane_waypoints, resolution):
+    """
+    Generate all points within a lane based on the center points, lane direction, and width.
+
+    :param lane_waypoints: List of waypoints representing the center of the lane.
+    :param resolution: The resolution (grid size) to discretize the lane points.
+    :return: A list of (x, y) tuples representing all points within the lane.
+    """
+    lane_points = []
+
+    for waypoint in lane_waypoints:
+        # Get lane width and yaw (direction)
+        half_width = waypoint.lane_width / 2.0  # Half lane width
+        transform = waypoint.transform
+        location = transform.location
+        yaw = math.radians(transform.rotation.yaw)  # Convert yaw to radians
+
+        # Get unit vectors for the lane direction (yaw)
+        cos_yaw = math.cos(yaw)
+        sin_yaw = math.sin(yaw)
+
+        # Perpendicular direction (normal to yaw direction)
+        # The perpendicular direction is given by rotating yaw by ±90 degrees
+        # x' = -sin(yaw), y' = cos(yaw) gives the perpendicular unit vector
+        perpendicular_cos = -sin_yaw
+        perpendicular_sin = cos_yaw
+
+        # Generate all points across the lane width at the current waypoint
+        offsets = np.arange(-half_width, half_width + resolution, resolution)
+        for offset in offsets:
+            # Compute the point's global position
+            x = location.x + offset * perpendicular_cos  # Perpendicular offset in x
+            y = location.y + offset * perpendicular_sin  # Perpendicular offset in y
+            # Add the point to the lane points list
+            lane_points.append(Point(x, y))
+
+    return lane_points
+
+
+def generate_lane_edges(lane_waypoints):
+    """
+    Generate points for the left and right edges of a lane based on the center points.
+
+    :param lane_waypoints: List of waypoints representing the center of the lane.
+    :return: Two lists of points [(x_left, y_left)], [(x_right, y_right)] for the left and right edges.
+    """
+    left_edge_points = []  # Points on the left edge
+    right_edge_points = []  # Points on the right edge
+
+    for waypoint in lane_waypoints:
+        # Get lane width and yaw (direction)
+        half_width = waypoint.lane_width / 2.0  # Half lane width
+        transform = waypoint.transform
+        location = transform.location
+        yaw = math.radians(transform.rotation.yaw)  # Convert yaw to radians
+
+        # Get unit vectors for the perpendicular direction (normal to yaw direction)
+        perpendicular_cos = -math.sin(yaw)  # Perpendicular offset x component
+        perpendicular_sin = math.cos(yaw)  # Perpendicular offset y component
+
+        # Calculate left edge point
+        x_left = location.x + half_width * perpendicular_cos
+        y_left = location.y + half_width * perpendicular_sin
+        left_edge_points.append(Point(x_left, y_left))
+
+        # Calculate right edge point
+        x_right = location.x - half_width * perpendicular_cos
+        y_right = location.y - half_width * perpendicular_sin
+        right_edge_points.append(Point(x_right, y_right))
+
+    return left_edge_points, right_edge_points
 
 
 def expand_grid_with_safety_distance(bounding_box_grid, safety_grid):
@@ -464,6 +348,79 @@ def expand_grid_with_safety_distance(bounding_box_grid, safety_grid):
                         expanded_cells.add((x, y))
 
     return expanded_cells
+
+
+def compute_inner_safe_grid(lane_grid, resolution, safety_distance, min_neighbors=3, neighbor_check_x=3):
+    """
+    Compute the inner lane grid and safe boundary grid for a given lane.
+
+    :param lane_grid: Set of grid points representing the lane grid.
+    :param resolution: Grid resolution (size of each grid cell in meters).
+    :param safety_distance: Safety distance (thickness) to check neighboring points.
+    :param min_neighbors: Minimum number of neighbors a grid cell must have in `lane_grid` to be considered inner.
+    :param neighbor_check_x: Range in grid units to check neighbors in cardinal directions (up, down, left, right).
+    :return: A tuple (inner_lane_grid, safe_boundary_grid).
+    """
+    # Safety distance in grid units
+    safety_distance_in_grids = int(safety_distance / resolution)
+
+    # Initialize the safe boundary grid
+    safe_boundary_grid = set()
+
+    # Directions to check (include all neighbors within the square range)
+    directions = [
+        (dx, dy)
+        for dx in range(-safety_distance_in_grids, safety_distance_in_grids + 1)
+        for dy in range(-safety_distance_in_grids, safety_distance_in_grids + 1)
+        if not (dx == 0 and dy == 0)  # Exclude the point itself
+    ]
+
+    # Iterate over all points in lane_grid
+    for point in lane_grid:
+        x, y = point
+
+        # Count the number of neighbors within the safety distance
+        not_neighbor_count = 0
+        for dx, dy in directions:
+            neighbor = (x + dx, y + dy)
+            if neighbor not in lane_grid:
+                not_neighbor_count += 1
+
+            # If we already have enough neighbors, break early
+            if not_neighbor_count >= min_neighbors:
+                break
+
+        # If the number of neighbors is less than `min_neighbors`, mark it as a safe boundary point
+        if not_neighbor_count >= min_neighbors:
+            safe_boundary_grid.add(point)
+
+    # Additional check to refine safe_boundary_grid
+    directions_cardinal = [(1, 0), (-1, 0), (0, 1), (0, -1)]  # Cardinal directions: up, down, left, right
+    points_to_remove = set()
+
+    for point in safe_boundary_grid:
+        x, y = point
+        valid_direction_count = 0
+
+        for dx, dy in directions_cardinal:
+            # Check the line in the current direction for lane_grid points
+            for step in range(1, neighbor_check_x + 1):
+                neighbor = (x + dx * step, y + dy * step)
+                if neighbor in lane_grid:
+                    valid_direction_count += 1
+                    break  # Found a valid point in this direction, move to the next direction
+
+        # If the point has enough valid directions, mark it for removal
+        if valid_direction_count >= 4:
+            points_to_remove.add(point)
+
+    # Remove points marked for removal from safe_boundary_grid
+    safe_boundary_grid -= points_to_remove
+
+    # Inner lane grid is lane_grid minus safe_boundary_grid
+    inner_lane_grid = lane_grid - safe_boundary_grid
+
+    return inner_lane_grid, safe_boundary_grid
 
 
 def to_grid(location, resolution=1.0):

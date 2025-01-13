@@ -13,8 +13,11 @@ import traceback
 import carla
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.patches import Polygon
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 
-from Env import Env, to_grid, to_carla
+from Env import Env, to_grid, to_carla, generate_lane_edges
 from ms_utils.apollo_routing_listener import ApolloRoutingListener
 
 
@@ -153,22 +156,58 @@ class DStar:
         return math.hypot(s_goal[0] - s_start[0], s_goal[1] - s_start[1])
 
 
-def save_grid(lane_grid, obs, ego_vehicle, target_grid, path, carla_map, bounds, resolution, safe_grid=None,
+def path_to_waypoints(path, resolution, carla_map):
+    """
+    Convert a path of grid points into a list of waypoints for driving.
+
+    :param path: List of grid cells representing the planned path.
+    :param resolution: Resolution (size of each grid cell in meters).
+    :param carla_map: Carla map object to fetch waypoints.
+    :return: List of waypoints along the path.
+    """
+
+    def to_physical(grid_point):
+        """Convert a grid point to real-world coordinates."""
+        try:
+            return grid_point[0] * resolution, grid_point[1] * resolution
+        except Exception as e:
+            print(f"[ERROR] Invalid grid point {grid_point}: {e}")
+            return None, None
+
+    waypoints = []
+    for grid_point in path:
+        # Convert grid point to real-world coordinates
+        world_x, world_y = to_physical(grid_point)
+        if world_x is not None and world_y is not None:
+            # Use Carla's map to fetch a waypoint at the real-world location
+            location = carla.Location(x=world_x, y=world_y, z=0.0)  # Assuming z=0.0
+            waypoint = carla_map.get_waypoint(location)
+            if waypoint:
+                waypoints.append(waypoint)
+
+    return waypoints
+
+
+def save_grid(ego_vehicle, lane_grid, obs, target_grid, path, carla_map, bounds, resolution, safe_grid=None,
               filename="grid_visualization.png"):
     """
     Save grid visualization to a file with the planned path, in real-world coordinates.
-
-    :param lane_grid: Set of lane grid cells
-    :param obs: Set of obstacle grid cells
-    :param ego_vehicle: Carla vehicle object representing the ego vehicle
-    :param target_grid: Tuple representing the target's grid position
-    :param path: List of grid cells representing the planned path
-    :param resolution: Resolution to adjust the path points
-    :param carla_map: Carla map object to fetch waypoints
-    :param bounds: Bounds of the area to visualize (x_min, y_min, x_max, y_max)
-    :param safe_grid: Set of safe grid cells (optional)
-    :param filename: Filename to save the visualization
+    :param ego_vehicle: Ego vehicle object.
+    :param lane_grid: Set of grid points representing the lane grid.
+    :param obs: Set of obstacle grid cells.
+    :param target_grid: Tuple representing the target's grid position.
+    :param path: List of grid cells representing the planned path.
+    :param resolution: Resolution to adjust the path points.
+    :param carla_map: Carla map object to fetch waypoints.
+    :param bounds: Bounds of the area to visualize (x_min, y_min, x_max, y_max).
+    :param safe_grid: Set of safe grid cells (optional).
+    :param filename: Filename to save the visualization.
     """
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Polygon
+    from matplotlib.lines import Line2D
+    import math
+
     plt.figure(figsize=(10, 10))
     plt.grid(True)
     plt.gca().set_aspect('equal', adjustable='box')
@@ -182,53 +221,112 @@ def save_grid(lane_grid, obs, ego_vehicle, target_grid, path, carla_map, bounds,
             print(f"[ERROR] Invalid grid point {grid_point}: {e}")
             return None, None
 
-    # Draw bounds range of Carla waypoints (bottom-most layer)
+    # Extract bounds
     x_min, y_min, x_max, y_max = bounds
-    waypoints = carla_map.generate_waypoints(distance=resolution)
-    waypoint_points = []
-    for wp in waypoints:
-        if x_min <= wp.transform.location.x <= x_max and y_min <= wp.transform.location.y <= y_max:
-            waypoint_points.append(wp.transform.location)
 
-    waypoint_x = [-wp.x for wp in waypoint_points]
-    waypoint_y = [wp.y for wp in waypoint_points]
-    plt.scatter(waypoint_x, waypoint_y, c='lightgray', s=2, label="Drivable Waypoints", zorder=0)
+    # Generate waypoints from Carla map
+    waypoints = carla_map.generate_waypoints(distance=resolution)
+
+    # Filter waypoints within bounds
+    bounded_waypoints = [
+        wp for wp in waypoints
+        if x_min <= wp.transform.location.x <= x_max and y_min <= wp.transform.location.y <= y_max
+    ]
+
+    # Use `generate_lane_edges` to compute lane edges for all bounded waypoints
+    left_edge_points, right_edge_points = generate_lane_edges(bounded_waypoints)
+
+    # Separate x and y coordinates for left and right edges
+    left_edge_x = [-point.x for point in left_edge_points]  # Flip X-axis
+    left_edge_y = [point.y for point in left_edge_points]
+
+    right_edge_x = [-point.x for point in right_edge_points]  # Flip X-axis
+    right_edge_y = [point.y for point in right_edge_points]
+
+    # Plot the left and right lane edges
+    plt.scatter(left_edge_x, left_edge_y, c='grey', s=2, label="Lane Edge", zorder=0)
+    plt.scatter(right_edge_x, right_edge_y, c='grey', s=2, label=None, zorder=0)
 
     # Draw lane grids in real-world coordinates (second bottom layer)
     lane_points = np.array([to_physical(cell) for cell in lane_grid if to_physical(cell) != (None, None)])
     if lane_points.size > 0:
-        plt.plot(lane_points[:, 0], lane_points[:, 1], 'g.', markersize=4, label="Lane", zorder=1)
+        plt.plot(-lane_points[:, 0], lane_points[:, 1], 'g.', markersize=4, label="Lane", zorder=1)  # Flip X-axis
 
     # Draw safe grids in real-world coordinates (middle layer)
     if safe_grid:
         safe_points = np.array([to_physical(cell) for cell in safe_grid if to_physical(cell) != (None, None)])
         if safe_points.size > 0:
-            plt.plot(safe_points[:, 0], safe_points[:, 1], 'c.', markersize=4, label="Safe Grid", zorder=2)
+            plt.plot(-safe_points[:, 0], safe_points[:, 1], 'c.', markersize=4, label="Safe Grid",
+                     zorder=2)  # Flip X-axis
 
     # Draw obstacle grids in real-world coordinates (middle layer)
     obstacle_points = np.array([to_physical(cell) for cell in obs if to_physical(cell) != (None, None)])
     if obstacle_points.size > 0:
-        plt.plot(obstacle_points[:, 0], obstacle_points[:, 1], 'r.', markersize=4, label="Obstacle", zorder=3)
+        plt.plot(-obstacle_points[:, 0], obstacle_points[:, 1], 'r.', markersize=4, label="Obstacle",
+                 zorder=3)  # Flip X-axis
 
     # Draw the target point in real-world coordinates (top layer)
     target_x, target_y = to_physical(target_grid)
-    plt.scatter([target_x], [target_y], c='orange', s=75, label="Target Point", zorder=6)
+    plt.scatter([-target_x], [target_y], c='orange', s=75, label="Target Point", zorder=6)  # Flip X-axis
 
     # Draw the planned path in real-world coordinates (above grid but below vehicle)
     if path:
         path_points = np.array([to_physical(p) for p in path])
-        plt.plot(path_points[:, 0], path_points[:, 1], 'b-', linewidth=2, label="Planned Path", zorder=4)
+        plt.plot(-path_points[:, 0], path_points[:, 1], 'b-', linewidth=2, label="Planned Path",
+                 zorder=4)  # Flip X-axis
 
-    # Draw the ego vehicle in real-world coordinates (top layer)
+        # Convert path to waypoints
+        planned_waypoints = path_to_waypoints(path, resolution, carla_map)
+
+        # Draw the planned waypoints
+        waypoint_x = [-wp.transform.location.x for wp in planned_waypoints]  # Flip X-axis
+        waypoint_y = [wp.transform.location.y for wp in planned_waypoints]
+        plt.plot(waypoint_x, waypoint_y, 'm--', linewidth=1, label="Planned Waypoints", zorder=7)
+
+    # Draw the ego vehicle as a triangle
     ego_location = ego_vehicle.get_location()
-    ego_x, ego_y = ego_location.x, ego_location.y
-    plt.scatter([ego_x], [ego_y], c='purple', s=75, label="Ego Vehicle", zorder=5)
+    ego_grid = to_grid(ego_location, resolution)
+    ego_x, ego_y = to_physical(ego_grid)
+    ego_yaw = math.radians(ego_vehicle.get_transform().rotation.yaw)
 
-    # Add legend and save the file
+    # Triangle size (vehicle representation)
+    triangle_size = 2.0  # Adjust size as necessary
+    half_width = triangle_size / 2.0
+
+    # Compute the three vertices of the triangle
+    # Front vertex (tip of the triangle in the direction of the vehicle's yaw)
+    front_x = ego_x + triangle_size * math.cos(ego_yaw)
+    front_y = ego_y + triangle_size * math.sin(ego_yaw)
+
+    # Rear-left vertex
+    rear_left_x = ego_x - half_width * math.cos(ego_yaw) - half_width * math.sin(ego_yaw)
+    rear_left_y = ego_y - half_width * math.sin(ego_yaw) + half_width * math.cos(ego_yaw)
+
+    # Rear-right vertex
+    rear_right_x = ego_x - half_width * math.cos(ego_yaw) + half_width * math.sin(ego_yaw)
+    rear_right_y = ego_y - half_width * math.sin(ego_yaw) - half_width * math.cos(ego_yaw)
+
+    # Flip X-axis for plotting
+    front_x = -front_x
+    rear_left_x = -rear_left_x
+    rear_right_x = -rear_right_x
+
+    # Plot the triangle for the ego vehicle
+    plt.fill(
+        [front_x, rear_left_x, rear_right_x],
+        [front_y, rear_left_y, rear_right_y],
+        color='purple',
+        alpha=0.7,
+        zorder=5
+    )
+
+    # Add legend to the plot
     plt.legend()
+
+    # Set axis labels, title, and save the plot
     plt.xlabel("X (meters)")
     plt.ylabel("Y (meters)")
-    plt.title("Grid Visualization in Real-World Coordinates")
+    plt.title("Grid Visualization in Real-World Coordinates (X-axis Flipped)")
     plt.savefig(filename)
     plt.close()
 
@@ -249,7 +347,7 @@ def main():
     # Find Ego vehicle
     max_retries = 5
     retry_interval = 2  # seconds
-    resolution = 1
+    resolution = 0.5
     ego_vehicle = None
 
     for attempt in range(max_retries):
@@ -339,14 +437,14 @@ def main():
                 grid_waypoints = [to_grid(wp.transform.location, resolution) for wp in waypoints]
 
                 # Collect all grid coordinates from waypoints and obstacles
-                all_grids = grid_waypoints + list(obstacle_grids)
+                all_grids = grid_waypoints + list(obstacle_grids) + [target_grid]
                 x_min = min(wp[0] for wp in all_grids)
                 y_min = min(wp[1] for wp in all_grids)
                 x_max = max(wp[0] for wp in all_grids)
                 y_max = max(wp[1] for wp in all_grids)
 
                 # Add a buffer to the bounds for safety
-                buffer = int(10 / resolution)  # Convert buffer to grid units
+                buffer = int(100 / resolution)  # Convert buffer to grid units
                 x_min -= buffer
                 y_min -= buffer
                 x_max += buffer
@@ -360,8 +458,8 @@ def main():
             print(f"[INFO] Bounds set to {bounds}")
 
             # Initialize environment with updated obstacles
-            env = Env(world, bounds, obstacles, carla_map, waypoints, target_waypoint, resolution=resolution,
-                      safety_distance=0.5)
+            env = Env(world, bounds, obstacles, carla_map, waypoints, resolution=resolution,
+                      safety_distance=1.5)
 
             # Initialize DStar planner
             planner = DStar(s_start=ego_grid, s_goal=target_grid, env=env)
@@ -389,7 +487,7 @@ def main():
                 print("[INFO] No valid navigation path could be generated.")
             filename = f"grid_visualization_{int(time.time())}.png"
             safe_grid = env.safe_grid_lane.union(env.safe_grid_obs)
-            save_grid(env.lane_grid, env.obs, ego_vehicle, target_grid, planned_path, carla_map, bounds,
+            save_grid(ego_vehicle, env.lane_grid, env.obs, target_grid, planned_path, carla_map, bounds,
                       resolution=resolution,
                       safe_grid=safe_grid, filename=filename)
             print(f"[INFO] Grid visualization saved to {filename}")
