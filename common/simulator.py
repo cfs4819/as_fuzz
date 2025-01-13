@@ -257,7 +257,9 @@ class Simulator(object):
         date_time = now.strftime("%Y%m%d_%H%M%S")
         logger.info('[Simulator] === Simulation Start:  \
                 [' + date_time + '] ===')
-
+        
+        self.simulation_start_time = time.time()
+        
         self.simulation_count += 1
 
         if not self.init_environment():
@@ -360,7 +362,6 @@ class Simulator(object):
         self.unsafe_detector.start_detection()
 
         logger.info('[Simulator] Simulation Initialized')
-        self.simulation_start_time = time.time()
 
     def feedback_eva(self, eva_result: Evaluate_Object):
         eva_result_t = Evaluate_Transfer(eva_result.res_id,
