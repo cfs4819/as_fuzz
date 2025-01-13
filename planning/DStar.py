@@ -10,9 +10,11 @@ import signal
 import sys
 import time
 import traceback
-
+import carla
 import matplotlib.pyplot as plt
-from Env import Env
+import numpy as np
+
+from Env import Env, to_grid, to_carla
 from ms_utils.apollo_routing_listener import ApolloRoutingListener
 
 
@@ -151,17 +153,19 @@ class DStar:
         return math.hypot(s_goal[0] - s_start[0], s_goal[1] - s_start[1])
 
 
-def save_grid(lane_grid, obstacles, ego_grid, target_grid, path, resolution, safe_grid=None,
+def save_grid(lane_grid, obs, ego_vehicle, target_grid, path, carla_map, bounds, resolution, safe_grid=None,
               filename="grid_visualization.png"):
     """
-    Save grid visualization to a file with the planned path.
+    Save grid visualization to a file with the planned path, in real-world coordinates.
 
     :param lane_grid: Set of lane grid cells
-    :param obstacles: Set of obstacle grid cells
-    :param ego_grid: Tuple representing the ego vehicle's grid position
+    :param obs: Set of obstacle grid cells
+    :param ego_vehicle: Carla vehicle object representing the ego vehicle
     :param target_grid: Tuple representing the target's grid position
     :param path: List of grid cells representing the planned path
     :param resolution: Resolution to adjust the path points
+    :param carla_map: Carla map object to fetch waypoints
+    :param bounds: Bounds of the area to visualize (x_min, y_min, x_max, y_max)
     :param safe_grid: Set of safe grid cells (optional)
     :param filename: Filename to save the visualization
     """
@@ -169,31 +173,62 @@ def save_grid(lane_grid, obstacles, ego_grid, target_grid, path, resolution, saf
     plt.grid(True)
     plt.gca().set_aspect('equal', adjustable='box')
 
-    # Draw lane grids
-    for cell in lane_grid:
-        plt.plot(cell[0], cell[1], 'g.', markersize=2, label="Lane" if cell == list(lane_grid)[0] else "")
+    # Convert grid coordinates to physical coordinates
+    def to_physical(grid_point):
+        """Convert a grid point to real-world coordinates."""
+        try:
+            return grid_point[0] * resolution, grid_point[1] * resolution
+        except Exception as e:
+            print(f"[ERROR] Invalid grid point {grid_point}: {e}")
+            return None, None
 
-    # Draw safe grids
+    # Draw bounds range of Carla waypoints (bottom-most layer)
+    x_min, y_min, x_max, y_max = bounds
+    waypoints = carla_map.generate_waypoints(distance=resolution)
+    waypoint_points = []
+    for wp in waypoints:
+        if x_min <= wp.transform.location.x <= x_max and y_min <= wp.transform.location.y <= y_max:
+            waypoint_points.append(wp.transform.location)
+
+    waypoint_x = [-wp.x for wp in waypoint_points]
+    waypoint_y = [wp.y for wp in waypoint_points]
+    plt.scatter(waypoint_x, waypoint_y, c='lightgray', s=2, label="Drivable Waypoints", zorder=0)
+
+    # Draw lane grids in real-world coordinates (second bottom layer)
+    lane_points = np.array([to_physical(cell) for cell in lane_grid if to_physical(cell) != (None, None)])
+    if lane_points.size > 0:
+        plt.plot(lane_points[:, 0], lane_points[:, 1], 'g.', markersize=4, label="Lane", zorder=1)
+
+    # Draw safe grids in real-world coordinates (middle layer)
     if safe_grid:
-        for cell in safe_grid:
-            plt.plot(cell[0], cell[1], 'c.', markersize=3, label="Safe Grid" if cell == list(safe_grid)[0] else "")
-    # Draw obstacle grids
-    for cell in obstacles:
-        plt.plot(cell[0], cell[1], 'r.', markersize=4, label="Obstacle" if cell == list(obstacles)[0] else "")
+        safe_points = np.array([to_physical(cell) for cell in safe_grid if to_physical(cell) != (None, None)])
+        if safe_points.size > 0:
+            plt.plot(safe_points[:, 0], safe_points[:, 1], 'c.', markersize=4, label="Safe Grid", zorder=2)
 
-    # Draw ego vehicle
-    plt.plot(ego_grid[0], ego_grid[1], 'bo', markersize=10, label="Ego Vehicle")
+    # Draw obstacle grids in real-world coordinates (middle layer)
+    obstacle_points = np.array([to_physical(cell) for cell in obs if to_physical(cell) != (None, None)])
+    if obstacle_points.size > 0:
+        plt.plot(obstacle_points[:, 0], obstacle_points[:, 1], 'r.', markersize=4, label="Obstacle", zorder=3)
 
-    # Draw target
-    plt.plot(target_grid[0], target_grid[1], 'yo', markersize=10, label="Target")
+    # Draw the target point in real-world coordinates (top layer)
+    target_x, target_y = to_physical(target_grid)
+    plt.scatter([target_x], [target_y], c='orange', s=75, label="Target Point", zorder=6)
 
-    # Draw the planned path
+    # Draw the planned path in real-world coordinates (above grid but below vehicle)
     if path:
-        path_x, path_y = zip(*[(p[0] / resolution, p[1] / resolution) for p in path])
-        plt.plot(path_x, path_y, 'b-', linewidth=2, label="Planned Path")
+        path_points = np.array([to_physical(p) for p in path])
+        plt.plot(path_points[:, 0], path_points[:, 1], 'b-', linewidth=2, label="Planned Path", zorder=4)
+
+    # Draw the ego vehicle in real-world coordinates (top layer)
+    ego_location = ego_vehicle.get_location()
+    ego_x, ego_y = ego_location.x, ego_location.y
+    plt.scatter([ego_x], [ego_y], c='purple', s=75, label="Ego Vehicle", zorder=5)
 
     # Add legend and save the file
     plt.legend()
+    plt.xlabel("X (meters)")
+    plt.ylabel("Y (meters)")
+    plt.title("Grid Visualization in Real-World Coordinates")
     plt.savefig(filename)
     plt.close()
 
@@ -201,7 +236,6 @@ def save_grid(lane_grid, obstacles, ego_grid, target_grid, path, resolution, saf
 def main():
     from cyber.python.cyber_py3 import cyber
     from loguru import logger
-    import carla
 
     client = carla.Client('localhost', 4000)
     client.set_timeout(10.0)
@@ -242,6 +276,14 @@ def main():
     def signal_handler(sig, frame):
         """Handle Ctrl+C to gracefully exit."""
         print("\n[INFO] Ctrl+C detected. Shutting down...")
+        print("[INFO] Current code execution point before shutdown:")
+
+        # Print the current stack trace
+        stack_trace = traceback.format_stack(frame)
+        for line in stack_trace:
+            print(line.strip())
+
+        # Ensure Apollo listener stops gracefully
         apollo_listener.stop()
         sys.exit(0)
 
@@ -275,9 +317,15 @@ def main():
 
             # Update obstacles
             obstacles = set()  # Ensure obstacles are a set for quick lookup
+            obstacle_grids = set()  # To store obstacle grid coordinates
+
             for actor in world.get_actors():
                 if "vehicle" in actor.type_id and actor.id != ego_vehicle.id:
                     obstacles.add(actor)
+                    # Convert obstacle location to grid coordinates
+                    obstacle_location = actor.get_location()
+                    obstacle_grid = to_grid(obstacle_location, resolution)
+                    obstacle_grids.add(obstacle_grid)
 
             # Update routing waypoints
             routing_waypoints = apollo_listener.routing_wps
@@ -285,15 +333,20 @@ def main():
                 waypoints = [wp[0] for wp in routing_waypoints if wp[0]]
                 target_waypoint = routing_waypoints[-1][-1]
                 target_location = target_waypoint.transform.location
-                target_grid = (int(target_location.x / resolution), int(target_location.y / resolution))
-                # Calculate bounds to cover all waypoints
-                x_min = min(wp.transform.location.x for wp in waypoints)
-                y_min = min(wp.transform.location.y for wp in waypoints)
-                x_max = max(wp.transform.location.x for wp in waypoints)
-                y_max = max(wp.transform.location.y for wp in waypoints)
+                target_grid = to_grid(target_location, resolution)  # Convert target location to grid coordinates
+
+                # Calculate bounds to cover all waypoints and obstacles in grid coordinates
+                grid_waypoints = [to_grid(wp.transform.location, resolution) for wp in waypoints]
+
+                # Collect all grid coordinates from waypoints and obstacles
+                all_grids = grid_waypoints + list(obstacle_grids)
+                x_min = min(wp[0] for wp in all_grids)
+                y_min = min(wp[1] for wp in all_grids)
+                x_max = max(wp[0] for wp in all_grids)
+                y_max = max(wp[1] for wp in all_grids)
 
                 # Add a buffer to the bounds for safety
-                buffer = 10  # Adjust buffer size as needed
+                buffer = int(10 / resolution)  # Convert buffer to grid units
                 x_min -= buffer
                 y_min -= buffer
                 x_max += buffer
@@ -302,12 +355,13 @@ def main():
                 print("[ERROR] No valid routing waypoints available. Exiting loop.")
                 break
 
-            # Set bounds around ego vehicle
+            # Set bounds around ego vehicle in grid coordinates
             bounds = (x_min, y_min, x_max, y_max)
+            print(f"[INFO] Bounds set to {bounds}")
 
             # Initialize environment with updated obstacles
             env = Env(world, bounds, obstacles, carla_map, waypoints, target_waypoint, resolution=resolution,
-                      safety_distance=1.0)
+                      safety_distance=0.5)
 
             # Initialize DStar planner
             planner = DStar(s_start=ego_grid, s_goal=target_grid, env=env)
@@ -334,8 +388,10 @@ def main():
             else:
                 print("[INFO] No valid navigation path could be generated.")
             filename = f"grid_visualization_{int(time.time())}.png"
-            save_grid(env.lane_grid, env.obs, ego_grid, target_grid, planned_path, resolution=resolution,
-                      safe_grid=env.safe_grid, filename=filename)
+            safe_grid = env.safe_grid_lane.union(env.safe_grid_obs)
+            save_grid(env.lane_grid, env.obs, ego_vehicle, target_grid, planned_path, carla_map, bounds,
+                      resolution=resolution,
+                      safe_grid=safe_grid, filename=filename)
             print(f"[INFO] Grid visualization saved to {filename}")
 
             if is_path_found:

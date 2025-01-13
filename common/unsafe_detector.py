@@ -197,14 +197,12 @@ class UnsafeDetector(object):
                     else:
                         # Reset resolve time for new blockage handling
                         last_resolve_time = time.time()
-                    if time.time() - blockage_start_time >= 15.0:
+                    if time.time() - blockage_start_time >= 10.0:
                         def condition(vehicle):
                             # The Vehicle is in front of ego and not speeding up
-                            return is_vehicle_in_front(self.vehicle,
-                                                       vehicle) and vehicle.get_velocity().length() < 1.0 and not is_vehicle_accelerating(
-                                vehicle)
+                            return is_vehicle_in_front(self.vehicle, vehicle) and vehicle.get_velocity().length() < 1.0
                         # Blockage has persisted for too long
-                        resolve_stuck_vehicles(road_blockage_result["vehicles_on_blocked_road"], condition, 0.5, 3)
+                        resolve_stuck_vehicles(road_blockage_result["vehicles_on_blocked_road"], condition, 1, 3)
 
                 # Trigger callback for road blockage
                 callback_triggered = self.trigger_callbacks(
@@ -330,7 +328,6 @@ class UnsafeDetector(object):
             results.append(result)
 
         return results
-
 
     def cleanup(self):
         # Clean up the sensors and stop all timers

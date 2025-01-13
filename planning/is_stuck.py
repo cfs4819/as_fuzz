@@ -355,9 +355,7 @@ class RoadBlockageChecker:
 
         def condition(vehicle):
             # The Vehicle is in front of ego and not speeding up
-            return is_vehicle_in_front(ego_vehicle,
-                                       vehicle) and vehicle.get_velocity().length() < 1.0 and not is_vehicle_accelerating(
-                vehicle)
+            return is_vehicle_in_front(ego_vehicle,vehicle) and vehicle.get_velocity().length() < 1.0
 
         resolve_stuck_vehicles(slow_vehicles, condition, throttle, duration)
 

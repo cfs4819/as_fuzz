@@ -33,6 +33,8 @@ from MS_fuzz.planning.is_stuck import is_vehicle_in_front
 
 import pdb
 
+from planning.is_stuck import is_vehicle_around
+
 
 class SimulationTimeoutTimer:
     def __init__(self, timeout, callback):
@@ -551,8 +553,7 @@ class Simulator(object):
             blocked_vehicles = data  # [carla.Vehicle]
 
             def condition_func(vehicle):
-                return is_vehicle_in_front(self.ego_vehicle, vehicle) and \
-                    vehicle.get_velocity().length() < 1.0
+                return (is_vehicle_in_front(self.ego_vehicle, vehicle) or is_vehicle_around(self.ego_vehicle, vehicle)) and vehicle.get_velocity().length() < 1.0
             handle_result = self.resolve_blockage(blocked_vehicles, condition_func)
             self.on_unsafe_lock = False
             return handle_result
