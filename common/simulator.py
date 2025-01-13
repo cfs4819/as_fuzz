@@ -7,6 +7,7 @@ import random
 import sys
 import queue
 import signal
+import pdb
 
 from datetime import datetime
 from typing import Dict
@@ -30,10 +31,7 @@ from MS_fuzz.common.result_saver import ResultSaver
 from MS_fuzz.planning.is_stuck import RoadBlockageChecker
 
 from MS_fuzz.planning.is_stuck import is_vehicle_in_front
-
-import pdb
-
-from planning.is_stuck import is_vehicle_around
+from MS_fuzz.planning.is_stuck import is_vehicle_around
 
 
 class SimulationTimeoutTimer:

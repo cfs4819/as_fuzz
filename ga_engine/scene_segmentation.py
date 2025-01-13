@@ -347,11 +347,11 @@ class SceneSegment(object):
             # we assume that the vehicle is stopped at the beginning of its planning road
             if self.ego_vehicle != None:
                 start_loc = self.ego_vehicle.get_transform().location
-                routing_wps[0][0] = self.carla_world.get_map(
-                ).get_waypoint(start_loc)
+                routing_wps[0][0] = self.carla_map.get_waypoint(start_loc)
 
         for i, route_wp in enumerate(routing_wps):
             if route_wp[0] is None:
+                # this route has no start wp
                 continue
             if route_wp[1] is not None:
                 if route_wp[0].is_junction and route_wp[1].is_junction:
