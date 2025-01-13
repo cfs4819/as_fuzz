@@ -13,10 +13,9 @@ from datetime import datetime
 from typing import Dict
 from loguru import logger
 from multiprocessing import Queue
-from shapely.geometry import Polygon
 
 from MS_fuzz.fuzz_config.Config import Config
-from MS_fuzz.ms_utils import calc_relative_loc
+from MS_fuzz.ms_utils import calc_relative_loc, freeze_and_set_green_all_tls, select_valid_dest
 from carla_bridge.apollo_carla_bridge import CarlaCyberBridge
 from carla_bridge.utils.transforms import carla_transform_to_cyber_pose
 from carla_bridge.utils.logurus import init_log
@@ -117,7 +116,8 @@ class Simulator(object):
 
         self.on_unsafe_lock = False
         self.start_unsafe_callback = False
-        
+
+        self.simulation_start_time = None
         self.stuck_trigger_times = 0
 
     def carla_bridge_handler(self, ego_spawn_point: dict = None):
@@ -193,7 +193,7 @@ class Simulator(object):
         Connect to carla simualtor.
         '''
         if (self.carla_client != None
-            and self.carla_world != None):
+                and self.carla_world != None):
             logger.warning("Connection already exists")
             return
         try:
@@ -263,7 +263,7 @@ class Simulator(object):
         if not self.init_environment():
             sys.exit()
 
-        self.freeze_and_set_green_all_tls()
+        freeze_and_set_green_all_tls(self.carla_world, logger)
 
         curr_datetime = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.result_path = os.path.join(self.cfgs.out_dir, curr_datetime)
@@ -293,8 +293,8 @@ class Simulator(object):
 
         times = 0
         success = False
-        self.destination = self.select_valid_dest(
-            min_radius=100, max_radius=9999)
+        self.destination = select_valid_dest(self.ego_vehicle, self.carla_map,
+                                             min_radius=100, max_radius=9999)
         logger.info('[Simulator] setting up apollo')
         while times < 3:
             try:
@@ -336,7 +336,7 @@ class Simulator(object):
         self.dv.set_destination_tranform(self.destination)
         for attempt in range(retry_attempts):
             if not self.scene_segmentation.wait_for_route(
-                route_req_time, wait_from_req_time=True, timeout=timeout_period):
+                    route_req_time, wait_from_req_time=True, timeout=timeout_period):
                 logger.warning(
                     f"[Simulator] Apollo failed to find the route, retry {attempt + 1}")
                 self.dv.set_destination_tranform(self.destination)
@@ -360,6 +360,7 @@ class Simulator(object):
         self.unsafe_detector.start_detection()
 
         logger.info('[Simulator] Simulation Initialized')
+        self.simulation_start_time = time.time()
 
     def feedback_eva(self, eva_result: Evaluate_Object):
         eva_result_t = Evaluate_Transfer(eva_result.res_id,
@@ -373,93 +374,6 @@ class Simulator(object):
             'eva_obj': eva_result_t
         }
         self.eva_req_queue.put(req_dic)
-
-    def detect_front_vehicle_obstacle(self, max_distance=10):
-        """
-        Check if there is a vehicle in front of the ego vehicle blocking its path when the ego is stationary.
-
-        Args:
-            ego_vehicle (carla.Vehicle): The ego vehicle object.
-            world (carla.World): Carla world object to access other actors and map.
-            max_distance (float): Maximum detection distance in front of the ego vehicle.
-            up_angle_th (float): Upper angle threshold for detection range.
-            low_angle_th (float): Lower angle threshold for detection range.
-
-        Returns:
-            tuple: (bool, carla.Vehicle or None)
-                - bool: True if a vehicle is blocking the path, False otherwise.
-                - carla.Vehicle: The blocking vehicle object, or None if no vehicle is detected.
-        """
-
-        def get_route_polygon():
-            """
-            Generate a polygon representing the area in front of the ego vehicle's route.
-            """
-            route_bb = []
-            extent_y = self.ego_vehicle.bounding_box.extent.y
-            r_ext = extent_y
-            l_ext = -extent_y
-            r_vec = ego_transform.get_right_vector()
-            p1 = ego_location + \
-                 carla.Location(r_ext * r_vec.x, r_ext * r_vec.y)
-            p2 = ego_location + \
-                 carla.Location(l_ext * r_vec.x, l_ext * r_vec.y)
-            route_bb.extend([[p1.x, p1.y, p1.z], [p2.x, p2.y, p2.z]])
-
-            for wp, _ in local_planner.get_plan():
-                if ego_location.distance(wp.transform.location) > max_distance:
-                    break
-                r_vec = wp.transform.get_right_vector()
-                p1 = wp.transform.location + \
-                     carla.Location(r_ext * r_vec.x, r_ext * r_vec.y)
-                p2 = wp.transform.location + \
-                     carla.Location(l_ext * r_vec.x, l_ext * r_vec.y)
-                route_bb.extend([[p1.x, p1.y, p1.z], [p2.x, p2.y, p2.z]])
-
-            # Ensure the polygon has enough points to form a valid shape
-            if len(route_bb) < 3:
-                return None
-
-            return Polygon(route_bb)
-
-        # Check if ego vehicle is stationary
-        velocity = self.ego_vehicle.get_velocity()
-        if velocity.x != 0 or velocity.y != 0 or velocity.z != 0:
-            return False, None  # Ego vehicle is not stationary
-
-        # Get global vehicle list
-        vehicle_list = self.carla_world.get_actors().filter("*vehicle*")
-        ego_transform = self.ego_vehicle.get_transform()
-        ego_location = ego_transform.location
-        ego_front_transform = ego_transform
-        ego_front_transform.location += carla.Location(
-            self.ego_vehicle.bounding_box.extent.x * ego_transform.get_forward_vector()
-        )
-        local_planner = self.carla_world.get_map()
-
-        # Get route bounding polygon
-        route_polygon = get_route_polygon()
-        if not route_polygon:
-            return False, None
-
-        for target_vehicle in vehicle_list:
-            if target_vehicle.id == self.ego_vehicle.id:
-                continue
-
-            target_transform = target_vehicle.get_transform()
-            if target_transform.location.distance(ego_location) > max_distance:
-                continue
-
-            # Check if the target vehicle blocks the route polygon
-            target_bb = target_vehicle.bounding_box
-            target_vertices = target_bb.get_world_vertices(target_transform)
-            target_polygon = Polygon([[v.x, v.y, v.z]
-                                      for v in target_vertices])
-
-            if route_polygon.intersects(target_polygon):
-                return True, target_vehicle
-
-        return False, None
 
     def resolve_blockage(self, vehicles, condition_func) -> bool:
         """
@@ -498,8 +412,8 @@ class Simulator(object):
                 break
         if scenario_vehicle:
             # stucked vehicle belongs to curr or prev,  set new dest
-            new_dest = self.select_valid_dest(
-                min_radius=100, max_radius=9999)
+            new_dest = select_valid_dest(scenario_vehicle.vehicle, self.carla_map,
+                                         min_radius=100, max_radius=9999)
             new_dest_loc = new_dest.location
             # change for robust
             if scenario_vehicle.agent:
@@ -521,14 +435,15 @@ class Simulator(object):
                         scenario_vehicle = NPC_v
                         break
                 if scenario_vehicle:
-                    new_dest = self.select_valid_dest(
-                        min_radius=100, max_radius=9999)
+                    new_dest = select_valid_dest(scenario_vehicle.vehicle, self.carla_map,
+                                                 min_radius=100, max_radius=9999)
                     new_dest_loc = new_dest.location
                     # change for robust
                     if scenario_vehicle.agent:
                         scenario_vehicle.agent.set_destination(new_dest_loc)
                         scenario_vehicle.end_loc = new_dest_loc
-                        logger.info(f"[ACTION] New destination: {new_dest_loc}")
+                        logger.info(
+                            f"[ACTION] New destination: {new_dest_loc}")
             else:
                 self.next_local_scenario.scenario_start()
         return True
@@ -547,7 +462,7 @@ class Simulator(object):
     '''
         trigger_time = time.time()
         time_pass = trigger_time - \
-                    self.result_saver.result_to_save['start_time']
+            self.result_saver.result_to_save['start_time']
         if type == UNSAFE_TYPE.ROAD_BLOCKED:
             logger.info(f'[Unsafe Detected]: {message}')
             # move the blocked vehicle away
@@ -555,7 +470,8 @@ class Simulator(object):
 
             def condition_func(vehicle):
                 return (is_vehicle_in_front(self.ego_vehicle, vehicle) or is_vehicle_around(self.ego_vehicle, vehicle)) and vehicle.get_velocity().length() < 1.0
-            handle_result = self.resolve_blockage(blocked_vehicles, condition_func)
+            handle_result = self.resolve_blockage(
+                blocked_vehicles, condition_func)
             self.on_unsafe_lock = False
             return handle_result
 
@@ -666,14 +582,8 @@ class Simulator(object):
         self.result_saver.result_to_save['stuck_time'] = self.unsafe_detector.total_stuck_time
         self.result_saver.result_to_save['block_time'] = self.unsafe_detector.total_block_time
         self.result_saver.result_to_save['stuck_trigger_times'] = self.stuck_trigger_times
+        self.result_saver.result_to_save['total_simulation_time'] = time.time()-self.simulation_start_time
         self.result_saver.save_result(curr_loc, save_video)
-
-    def freeze_and_set_green_all_tls(self):
-        traffic_lights = self.carla_world.get_actors().filter('traffic.traffic_light')
-        for tl in traffic_lights:
-            tl.set_state(carla.TrafficLightState.Green)
-            tl.freeze(True)
-        logger.info('[Simulator] freeze and set green all tls')
 
     def wait_until_vehicle_moving(self, timeout=5.0):
         to = timeout
@@ -763,7 +673,7 @@ class Simulator(object):
                         self.curr_local_scenario.scenario_start()
 
                 if self.curr_local_scenario != None and \
-                    self.curr_local_scenario.evaluate_obj != None:
+                        self.curr_local_scenario.evaluate_obj != None:
                     log_id = f'{curr_index}_{self.curr_local_scenario.evaluate_obj.id}'
                 else:
                     log_id = f'{curr_index}'
@@ -874,7 +784,7 @@ class Simulator(object):
         module_status = self.dv.get_module_status()
         for module, status in module_status.items():
             if (module not in self.modules
-                or status):
+                    or status):
                 continue
             if module == "Prediction" or module == "Planning":
                 logger.warning('[Simulator] Module is closed: '
@@ -894,25 +804,6 @@ class Simulator(object):
                     break
             logger.warning('[Simulator] Module is closed: '
                            + module + ' ==> maybe not affect')
-
-    def select_valid_dest(self, min_radius=100, max_radius=150) -> carla.Transform:
-        '''
-            Select a destination outside the specified radius from current position
-        '''
-        ego_curr_point = self.ego_vehicle.get_transform()
-        valid_destination = False
-        sps = self.carla_map.get_spawn_points()
-        while not valid_destination:
-            des_transform = random.choice(sps)
-            des_wp = self.carla_map.get_waypoint(des_transform.location,
-                                                 project_to_road=False)
-            distance = ego_curr_point.location.distance(des_transform.location)
-            if distance < min_radius or distance > max_radius:
-                continue
-            if des_wp.is_junction:
-                continue
-            valid_destination = True
-        return des_transform
 
     def restart_module(self, dv_remote: dreamview.Connection,
                        module, retry_times: int = 5) -> bool:

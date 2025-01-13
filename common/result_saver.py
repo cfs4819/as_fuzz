@@ -45,7 +45,8 @@ class ResultSaver(object):
             'end_loc': None,
             'start_time': time.time(),
             'end_time': None,
-            'run_time': None,
+            'total_simulation_time': None,
+            'local_scenario_run_time': None,
             'stuck_time': None,
             'stuck_trigger_times': None,
             'block_time': None,
@@ -151,7 +152,7 @@ class ResultSaver(object):
 
         now = time.time()
         self.result_to_save['end_time'] = now
-        self.result_to_save['run_time'] = now - \
+        self.result_to_save['local_scenario_run_time'] = now - \
                                           self.result_to_save['start_time']
 
         if not self.frames_record or len(self.frames_record) == 0:

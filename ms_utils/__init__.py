@@ -4,6 +4,124 @@ import numpy as np
 # import copy
 # from config import APOLLO_ROOT, RECORDS_DIR, STREAM_LOGGING_LEVEL
 import carla
+import random
+
+from shapely.geometry import Polygon
+
+def freeze_and_set_green_all_tls(carla_world, logger):
+    traffic_lights = carla_world.get_actors().filter('traffic.traffic_light')
+    for tl in traffic_lights:
+        tl.set_state(carla.TrafficLightState.Green)
+        tl.freeze(True)
+    logger.info('[Simulator] freeze and set green all tls')
+
+
+def select_valid_dest(ego_vehicle, carla_map, min_radius=100, max_radius=150) -> carla.Transform:
+    '''
+        Select a destination outside the specified radius from current position
+    '''
+    ego_curr_point = ego_vehicle.get_transform()
+    valid_destination = False
+    sps = carla_map.get_spawn_points()
+    while not valid_destination:
+        des_transform = random.choice(sps)
+        des_wp = carla_map.get_waypoint(des_transform.location,
+                                        project_to_road=False)
+        distance = ego_curr_point.location.distance(des_transform.location)
+        if distance < min_radius or distance > max_radius:
+            continue
+        if des_wp.is_junction:
+            continue
+        valid_destination = True
+    return des_transform
+
+
+def detect_front_vehicle_obstacle(world, ego_vehicle, max_distance=10):
+    """
+    Check if there is a vehicle in front of the ego vehicle blocking its path when the ego is stationary.
+
+    Args:
+        ego_vehicle (carla.Vehicle): The ego vehicle object.
+        world (carla.World): Carla world object to access other actors and map.
+        max_distance (float): Maximum detection distance in front of the ego vehicle.
+        up_angle_th (float): Upper angle threshold for detection range.
+        low_angle_th (float): Lower angle threshold for detection range.
+
+    Returns:
+        tuple: (bool, carla.Vehicle or None)
+            - bool: True if a vehicle is blocking the path, False otherwise.
+            - carla.Vehicle: The blocking vehicle object, or None if no vehicle is detected.
+    """
+
+    def get_route_polygon():
+        """
+        Generate a polygon representing the area in front of the ego vehicle's route.
+        """
+        route_bb = []
+        extent_y = ego_vehicle.bounding_box.extent.y
+        r_ext = extent_y
+        l_ext = -extent_y
+        r_vec = ego_transform.get_right_vector()
+        p1 = ego_location + \
+            carla.Location(r_ext * r_vec.x, r_ext * r_vec.y)
+        p2 = ego_location + \
+            carla.Location(l_ext * r_vec.x, l_ext * r_vec.y)
+        route_bb.extend([[p1.x, p1.y, p1.z], [p2.x, p2.y, p2.z]])
+
+        for wp, _ in local_planner.get_plan():
+            if ego_location.distance(wp.transform.location) > max_distance:
+                break
+            r_vec = wp.transform.get_right_vector()
+            p1 = wp.transform.location + \
+                carla.Location(r_ext * r_vec.x, r_ext * r_vec.y)
+            p2 = wp.transform.location + \
+                carla.Location(l_ext * r_vec.x, l_ext * r_vec.y)
+            route_bb.extend([[p1.x, p1.y, p1.z], [p2.x, p2.y, p2.z]])
+
+        # Ensure the polygon has enough points to form a valid shape
+        if len(route_bb) < 3:
+            return None
+
+        return Polygon(route_bb)
+
+    # Check if ego vehicle is stationary
+    velocity = ego_vehicle.get_velocity()
+    if velocity.x != 0 or velocity.y != 0 or velocity.z != 0:
+        return False, None  # Ego vehicle is not stationary
+
+    # Get global vehicle list
+    vehicle_list = world.get_actors().filter("*vehicle*")
+    ego_transform = ego_vehicle.get_transform()
+    ego_location = ego_transform.location
+    ego_front_transform = ego_transform
+    ego_front_transform.location += carla.Location(
+        ego_vehicle.bounding_box.extent.x * ego_transform.get_forward_vector()
+    )
+    local_planner = world.get_map()
+
+    # Get route bounding polygon
+    route_polygon = get_route_polygon()
+    if not route_polygon:
+        return False, None
+
+    for target_vehicle in vehicle_list:
+        if target_vehicle.id == ego_vehicle.id:
+            continue
+
+        target_transform = target_vehicle.get_transform()
+        if target_transform.location.distance(ego_location) > max_distance:
+            continue
+
+        # Check if the target vehicle blocks the route polygon
+        target_bb = target_vehicle.bounding_box
+        target_vertices = target_bb.get_world_vertices(target_transform)
+        target_polygon = Polygon([[v.x, v.y, v.z]
+                                  for v in target_vertices])
+
+        if route_polygon.intersects(target_polygon):
+            return True, target_vehicle
+
+    return False, None
 
 
 def calc_relative_loc(ref_tf: carla.Transform,
@@ -127,20 +245,20 @@ def predict_collision(actor1: carla.ActorSnapshot,
         # Update positions
         future_pos1 = carla.Location(
             x=position1.x + (velocity1.x * t) + 0.5
-              * acceleration1.x * t ** 2,
+            * acceleration1.x * t ** 2,
             y=position1.y + (velocity1.y * t) + 0.5
-              * acceleration1.y * t ** 2,
+            * acceleration1.y * t ** 2,
             z=position1.z + (velocity1.z * t) + 0.5
-              * acceleration1.z * t ** 2
+            * acceleration1.z * t ** 2
         )
 
         future_pos2 = carla.Location(
             x=position2.x + (velocity2.x * t) + 0.5
-              * acceleration2.x * t ** 2,
+            * acceleration2.x * t ** 2,
             y=position2.y + (velocity2.y * t) + 0.5
-              * acceleration2.y * t ** 2,
+            * acceleration2.y * t ** 2,
             z=position2.z + (velocity2.z * t) + 0.5
-              * acceleration2.z * t ** 2
+            * acceleration2.z * t ** 2
         )
 
         # Calculate distance between future positions

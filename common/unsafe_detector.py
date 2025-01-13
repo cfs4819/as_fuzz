@@ -218,7 +218,7 @@ class UnsafeDetector(object):
 
         """
         blockage_start_time = None  # Timestamp when blockage is detected
-        last_resolve_time = None  # Timestamp when blockage is last resolved
+        last_calc_time = time.time()  # Timestamp for last time increment
         callback_triggered = False  # Whether a callback has been triggered
 
         while not self.road_blockage_event.is_set():
@@ -230,31 +230,35 @@ class UnsafeDetector(object):
                 if blockage_start_time is not None:
                     self.total_block_time += time.time() - blockage_start_time
                     blockage_start_time = None
-                    callback_triggered = False
+                callback_triggered = False
+                last_calc_time = time.time()  # Reset last_calc_time for accurate tracking
                 time.sleep(0.5)
                 continue
 
             # Blockage detected
+            current_time = time.time()
             if blockage_start_time is None:
-                blockage_start_time = time.time()
-                last_resolve_time = time.time()
+                blockage_start_time = current_time
+                last_calc_time = current_time
 
-            self.total_block_time += time.time() - blockage_start_time
+            # Increment total blockage time
+            self.total_block_time += current_time - last_calc_time
+            last_calc_time = current_time
 
             if not self.try_relese_block:
                 time.sleep(0.5)
                 continue
 
             if callback_triggered:
-                elapsed_since_resolve = time.time() - last_resolve_time
+                elapsed_since_resolve = current_time - last_calc_time
                 if elapsed_since_resolve < 3.0:
                     time.sleep(0.5)
                     continue
 
                 # Reset resolve time for new blockage handling
-                last_resolve_time = time.time()
+                last_calc_time = current_time
 
-                if time.time() - blockage_start_time >= 10.0:
+                if current_time - blockage_start_time >= 10.0:
                     def condition(vehicle):
                         # The vehicle is in front of ego and not speeding up
                         return is_vehicle_in_front(self.vehicle, vehicle) \
