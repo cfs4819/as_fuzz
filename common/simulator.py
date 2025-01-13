@@ -117,6 +117,8 @@ class Simulator(object):
 
         self.on_unsafe_lock = False
         self.start_unsafe_callback = False
+        
+        self.stuck_trigger_times = 0
 
     def carla_bridge_handler(self, ego_spawn_point: dict = None):
         try:
@@ -274,7 +276,8 @@ class Simulator(object):
                                          self.result_path)
 
         self.unsafe_detector = UnsafeDetector(self.carla_world,
-                                              self.ego_vehicle)
+                                              self.ego_vehicle,
+                                              try_relese_block=self.cfgs.try_relese_block)
 
         self.unsafe_detector.register_callback(self.on_unsafe)
         self.unsafe_detector.init_sensors()
@@ -586,6 +589,7 @@ class Simulator(object):
             if time_pass < 60:
                 self.on_unsafe_lock = False
                 return
+            self.stuck_trigger_times += 1
             if self.next_local_scenario != None:
                 # try start next scenario
                 logger.info('Stucked, try start next scenario')
@@ -661,6 +665,7 @@ class Simulator(object):
         curr_loc = self.ego_vehicle.get_location()
         self.result_saver.result_to_save['stuck_time'] = self.unsafe_detector.total_stuck_time
         self.result_saver.result_to_save['block_time'] = self.unsafe_detector.total_block_time
+        self.result_saver.result_to_save['stuck_trigger_times'] = self.stuck_trigger_times
         self.result_saver.save_result(curr_loc, save_video)
 
     def freeze_and_set_green_all_tls(self):

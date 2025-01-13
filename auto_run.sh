@@ -1,4 +1,5 @@
 #!/bin/bash
+APOLLO_PATH=$(dirname "$(dirname "$(pwd)")"
 
 if [ -z "$1" ]; then
   echo "Usage: $0 <hours>"
@@ -16,7 +17,7 @@ echo "Command execution log - $(date)" > $log_file
 echo "Executing for $hours hours" 
 echo "Executing for $hours hours" >> $log_file
 
-start_carla_script=~/apollo_carla_8/apollo-r8.0.0/modules/MS_fuzz/run_carla_offscreen.sh
+start_carla_script="$APOLLO_PATH/modules/MS_fuzz/run_carla_offscreen.sh"
 run_cmd='cd /apollo/modules/MS_fuzz/ && python msfuzz.py --town 4'
 
 while [ $(date +%s) -lt $end_time ]; do

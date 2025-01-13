@@ -47,6 +47,7 @@ class ResultSaver(object):
             'end_time': None,
             'run_time': None,
             'stuck_time': None,
+            'stuck_trigger_times': None,
             'block_time': None,
             'interaction': None,
             'video_path': None,

@@ -27,9 +27,13 @@ class UNSAFE_TYPE():
 
 
 class UnsafeDetector(object):
-    def __init__(self, world: carla.World, vehicle: carla.Vehicle):
+    def __init__(self, world: carla.World,
+                 vehicle: carla.Vehicle,
+                 try_relese_block=False):
         self.world = world
         self.vehicle = vehicle
+        self.try_relese_block = try_relese_block
+        
         self.map = self.world.get_map()
         self.lane_change_detector = None
         self.collision_detector = None
@@ -67,8 +71,8 @@ class UnsafeDetector(object):
         """
         slow_vehicles = [
             actor for actor in self.world.get_actors()
-            if "vehicle" in actor.type_id and
-               actor.get_velocity().length() < 0.5
+            if "vehicle" in actor.type_id
+               and actor.get_velocity().length() < 0.5
         ]
         if self.vehicle in slow_vehicles:
             slow_vehicles.remove(self.vehicle)
@@ -174,6 +178,44 @@ class UnsafeDetector(object):
         - Detects road blockage and triggers callbacks.
         - Ensures a 3-second gap between consecutive blockage detections.
         - Records total blockage time.
+
+        - branch:
+                ┌─────────────────────────────────────┐
+                │ while not road_blockage_event:      │
+                │   road_blockage_result = ...        │
+                └─────────────────────────────────────┘
+                            ▼
+                    road_blockage_result["blocked"]?
+                            │
+                    ┌─────────┴─────────┐
+                    │                   │
+                    │ Yes (Branch A)    │ No (Branch B)
+                    │                   │
+                    ▼                   ▼
+                ┌────────────────────┐  ┌───────────────────────────────┐
+                │ if blockage_start: │  │ if blockage_start_time ...    │
+                │ A1: first-time     │  │ B1: blockage -> resolved,     │
+                │     blockage       │  │     accumulate time           │
+                └────────────────────┘  └───────────────────────────────┘
+                    ▼
+                ┌─────────────────────────────┐
+                │ if callback_triggered:      │
+                │ A2: callback already fired  │
+                └─────────────────────────────┘
+                    ▼
+                ┌────────────────────────────────────────────────┐
+                │ A2a: <3.0s => sleep(0.5) + continue            │
+                │ A2b: >=3.0s => reset last_resolve_time         │
+                │ A2c: >=10.0s => resolve_stuck_vehicles()       │
+                └────────────────────────────────────────────────┘
+                    ▼
+                ┌────────────────────────────────────────────────────────────┐
+                │ A3: trigger_callbacks => returns whether callback fired    │
+                └────────────────────────────────────────────────────────────┘
+                            ▼
+                    time.sleep(0.5)
+                        (loop continues)
+
         """
         blockage_start_time = None  # Timestamp when blockage is detected
         last_resolve_time = None  # Timestamp when blockage is last resolved
@@ -182,44 +224,52 @@ class UnsafeDetector(object):
         while not self.road_blockage_event.is_set():
             road_blockage_result = self.is_road_blocked()
 
-            if road_blockage_result["blocked"]:
-                # Blockage detected
-                if blockage_start_time is None:
-                    blockage_start_time = time.time()
-                    last_resolve_time = time.time()
-
-                if callback_triggered:
-                    elapsed_since_resolve = time.time() - last_resolve_time
-                    if elapsed_since_resolve < 3.0:
-                        # Wait for the previous blockage to fully resolve
-                        time.sleep(0.5)
-                        continue
-                    else:
-                        # Reset resolve time for new blockage handling
-                        last_resolve_time = time.time()
-                    if time.time() - blockage_start_time >= 10.0:
-                        def condition(vehicle):
-                            # The Vehicle is in front of ego and not speeding up
-                            return is_vehicle_in_front(self.vehicle, vehicle) and vehicle.get_velocity().length() < 1.0
-                        # Blockage has persisted for too long
-                        resolve_stuck_vehicles(road_blockage_result["vehicles_on_blocked_road"], condition, 1, 3)
-
-                # Trigger callback for road blockage
-                callback_triggered = self.trigger_callbacks(
-                    UNSAFE_TYPE.ROAD_BLOCKED,
-                    f"Road {road_blockage_result['blocked_road_id']} is blocked.",
-                    road_blockage_result["vehicles_on_blocked_road"]
-                )[0]
-
-            else:
+            # No blockage at present
+            if not road_blockage_result["blocked"]:
                 # Blockage resolved
                 if blockage_start_time is not None:
-                    # Update total blockage time
                     self.total_block_time += time.time() - blockage_start_time
                     blockage_start_time = None
                     callback_triggered = False
+                time.sleep(0.5)
+                continue
 
-            time.sleep(0.5)  # Perform check every 0.5 seconds
+            # Blockage detected
+            if blockage_start_time is None:
+                blockage_start_time = time.time()
+                last_resolve_time = time.time()
+
+            self.total_block_time += time.time() - blockage_start_time
+
+            if not self.try_relese_block:
+                time.sleep(0.5)
+                continue
+
+            if callback_triggered:
+                elapsed_since_resolve = time.time() - last_resolve_time
+                if elapsed_since_resolve < 3.0:
+                    time.sleep(0.5)
+                    continue
+
+                # Reset resolve time for new blockage handling
+                last_resolve_time = time.time()
+
+                if time.time() - blockage_start_time >= 10.0:
+                    def condition(vehicle):
+                        # The vehicle is in front of ego and not speeding up
+                        return is_vehicle_in_front(self.vehicle, vehicle) \
+                            and vehicle.get_velocity().length() < 1.0
+                    resolve_stuck_vehicles(
+                        road_blockage_result["vehicles_on_blocked_road"], condition, 1, 3)
+
+            # Trigger callback for road blockage
+            callback_triggered = self.trigger_callbacks(
+                UNSAFE_TYPE.ROAD_BLOCKED,
+                f"Road {road_blockage_result['blocked_road_id']} is blocked.",
+                road_blockage_result["vehicles_on_blocked_road"]
+            )[0]
+
+            time.sleep(0.5)
 
     def on_collision(self, event):
         # Handle collision events
@@ -377,14 +427,12 @@ if __name__ == '__main__':
 
     decector = UnsafeDetector(world, ego_vehicle)
 
-
     def callback(type, message, data):
         if type == UNSAFE_TYPE.ACCELERATION:
             # print(f'{message}\r', end=' ')
             pass
         else:
             print(message)
-
 
     decector.register_callback(callback)
     decector.init_sensors()

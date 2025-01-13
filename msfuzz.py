@@ -20,16 +20,18 @@ from MS_fuzz.ga_engine.ga_lib import GA_LIB
 
 def set_args():
     argument_parser = argparse.ArgumentParser()
-    argument_parser.add_argument("-o", "--out-dir", default="output", type=str,
+    argument_parser.add_argument("-o", "--out-dir", default="/apollo/data/MS_fuzz/result", type=str,
                                  help="Directory to save fuzzing logs")
     # argument_parser.add_argument("-m", "--max-mutations", default=5, type=int,
     #                              help="Size of the mutated population per cycle")
-    argument_parser.add_argument("-u", "--sim-host", default="localhost", type=str,
+    argument_parser.add_argument("-u", "--sim-host", default="172.17.0.1", type=str,
                                  help="Hostname of Carla simulation server")
     argument_parser.add_argument("-p", "--sim-port", default=4000, type=int,
                                  help="RPC port of Carla simulation server")
     argument_parser.add_argument("--town", default=10, type=int,
                                  help="Test on a specific town (e.g., '--town 3' forces Town03)")
+    argument_parser.add_argument("-ntrb", "--not-trying-release-block", action="store_true",
+                                 help="Disable releasing road blockage, only log the blockage time")
     return argument_parser
 
 
@@ -40,8 +42,11 @@ class MS_FUZZ(object):
         town_index = args.town
         self.conf.carla_map = self.conf.town_name[str(town_index)]
         self.conf.dreamview_map = self.conf.dreamview_map_dic[self.conf.carla_map]
-        # self.conf.sim_port = args.port
-
+        self.conf.sim_port = args.sim_port
+        self.conf.sim_host = args.sim_host
+        self.conf.out_dir = args.out_dir
+        self.conf.try_relese_block = not args.not_trying_release_block
+        
         self.eva_req_queue = multiprocessing.Queue()
         self.eva_res_queue = multiprocessing.Queue()
 

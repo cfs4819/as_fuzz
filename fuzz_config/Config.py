@@ -73,6 +73,7 @@ class Config:
         self.num_mutation_car = 1
         self.density = 1
         self.no_traffic_lights = False
+        self.try_relese_block = True
 
         # Fuzzing metadata
         self.town = None
