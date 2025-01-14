@@ -17,7 +17,7 @@ from matplotlib.patches import Polygon
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 
-from Env import Env, to_grid, to_carla, generate_lane_edges
+from planning.Env import Env, to_grid, to_carla, generate_lane_edges
 from ms_utils.apollo_routing_listener import ApolloRoutingListener
 
 

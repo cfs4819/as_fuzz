@@ -16,6 +16,7 @@ class UNSAFE_TYPE():
     STUCK = 4
     ACCELERATION = 5
     ROAD_BLOCKED = 6
+    BLOCK_STUCK = 7
 
     type_str = ['NONE',
                 'COLLISION',
@@ -23,7 +24,8 @@ class UNSAFE_TYPE():
                 'LANE_CHANGE',
                 'STUCK',
                 'ACCELERATION',
-                'ROAD_BLOCKED']
+                'ROAD_BLOCKED',
+                'BLOCK_STUCK']
 
 
 class UnsafeDetector(object):

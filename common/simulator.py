@@ -28,9 +28,9 @@ from MS_fuzz.common.evaluate import Evaluate_Object, Evaluate_Transfer
 from MS_fuzz.ga_engine.scene_segmentation import SceneSegment
 from MS_fuzz.common.result_saver import ResultSaver
 from MS_fuzz.planning.is_stuck import RoadBlockageChecker
-
 from MS_fuzz.planning.is_stuck import is_vehicle_in_front
 from MS_fuzz.planning.is_stuck import is_vehicle_around
+from MS_fuzz.planning.VehicleNavigation import VehicleNavigation
 
 
 class SimulationTimeoutTimer:
@@ -257,9 +257,9 @@ class Simulator(object):
         date_time = now.strftime("%Y%m%d_%H%M%S")
         logger.info('[Simulator] === Simulation Start:  \
                 [' + date_time + '] ===')
-        
+
         self.simulation_start_time = time.time()
-        
+
         self.simulation_count += 1
 
         if not self.init_environment():
@@ -514,12 +514,13 @@ class Simulator(object):
                     self.next_local_scenario.scenario_start()
                     self.on_unsafe_lock = False
                     return
-            # if --:
-            #     remove_
-            #     return
             logger.info(f'[Unsafe Detected]: {message}')
             self.result_saver.result_to_save['unsafe'] = True
-            self.result_saver.result_to_save['unsafe_type'] = UNSAFE_TYPE.type_str[type]
+            logger.info(f"Analyzing stucked reason")
+            if self.check_road_block_stuck():
+                self.result_saver.result_to_save['unsafe_type'] = UNSAFE_TYPE.type_str[UNSAFE_TYPE.ROAD_BLOCKED]
+            else:
+                self.result_saver.result_to_save['unsafe_type'] = UNSAFE_TYPE.type_str[type]
             logger.info('reload')
             self.stop_record_and_save(save_video=True)
             if self.curr_local_scenario is not None:
@@ -530,6 +531,31 @@ class Simulator(object):
             self.close()
         self.on_unsafe_lock = False
         return
+
+    def check_road_block_stuck(self):
+        road_block_stuck = True
+        vehicle_navigation = VehicleNavigation(self.carla_world,
+                                               self.scene_segmentation.routing_listener.routing_wps,
+                                               self.carla_map)
+        try:
+            # Plan a path using VehicleNavigation
+            vehicle_navigation.run()
+            # waypoints in planned_path
+            planned_path = vehicle_navigation.perform_planning()
+            # save the pic in grid_visualization_{int(time.time())}.png
+            visualization_file_path = os.path.join(self.result_path,
+                                                   f"grid_visualization_{int(time.time())}.png")
+
+            vehicle_navigation.save_visualization(planned_path,
+                                                  visualization_file_path)
+            logger.info(
+                f"[INFO] Save visualization to {visualization_file_path}")
+            road_block_stuck = False if planned_path else True
+        except Exception as e:
+            logger.error(
+                f"[ERROR] Exception occurred during check_block_stuck: {e}")
+            return False
+        return road_block_stuck
 
     def start_record(self, id=None):
         self.result_saver.clear_result()
@@ -583,7 +609,8 @@ class Simulator(object):
         self.result_saver.result_to_save['stuck_time'] = self.unsafe_detector.total_stuck_time
         self.result_saver.result_to_save['block_time'] = self.unsafe_detector.total_block_time
         self.result_saver.result_to_save['stuck_trigger_times'] = self.stuck_trigger_times
-        self.result_saver.result_to_save['total_simulation_time'] = time.time()-self.simulation_start_time
+        self.result_saver.result_to_save['total_simulation_time'] = time.time(
+        ) - self.simulation_start_time
         self.result_saver.save_result(curr_loc, save_video)
 
     def wait_until_vehicle_moving(self, timeout=5.0):

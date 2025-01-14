@@ -1,21 +1,22 @@
+import carla
+from planning.Env import Env
+from planning.DStar import save_grid, DStar
+from ms_utils.apollo_routing_listener import ApolloRoutingListener
 import os
 import signal
 import sys
 import time
 import traceback
 
-parent_directory = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+parent_directory = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), '..'))
 sys.path.append(parent_directory)
-from ms_utils.apollo_routing_listener import ApolloRoutingListener
-from planning.DStar import save_grid, DStar
-from planning.Env import Env
-import carla
 
 
 class VehicleNavigation:
-    def __init__(self, world, apollo_listener, carla_map):
+    def __init__(self, world, apollo_routing_wps, carla_map):
         self.world = world
-        self.apollo_listener = apollo_listener
+        self.apollo_routing_wps = apollo_routing_wps
         self.carla_map = carla_map
         self.resolution = 0.5
         self.ego_vehicle = None
@@ -52,21 +53,24 @@ class VehicleNavigation:
 
     def update_routing_waypoints(self):
         """Update the routing waypoints and calculate bounds."""
-        routing_waypoints = self.apollo_listener.routing_wps
+        routing_waypoints = self.apollo_routing_wps
         if not routing_waypoints:
             print("[ERROR] No valid routing waypoints available. Exiting loop.")
             return False
 
         # Extract Waypoints from routing_waypoints (assuming each wp is [Waypoint, OtherData])
-        waypoints = [wp[0] for wp in routing_waypoints if wp[0]]  # wp[0] should be the Waypoint object
+        # wp[0] should be the Waypoint object
+        waypoints = [wp[0] for wp in routing_waypoints if wp[0]]
 
         # Correctly extract the target waypoint (the last waypoint)
-        target_waypoint = routing_waypoints[-1][0]  # Get the first element from the last waypoint list
+        # Get the first element from the last waypoint list
+        target_waypoint = routing_waypoints[-1][0]
         target_location = target_waypoint.transform.location
         target_grid = self.to_grid(target_location)
 
         # Calculate bounds
-        grid_waypoints = [self.to_grid(wp.transform.location) for wp in waypoints]
+        grid_waypoints = [self.to_grid(wp.transform.location)
+                          for wp in waypoints]
 
         # Update obstacles
         obstacle_grids = self.update_obstacles()[1]
@@ -93,18 +97,20 @@ class VehicleNavigation:
     def initialize_environment(self):
         """Initialize the environment for the planner."""
         obstacles = self.update_obstacles()[0]
-        waypoints = [wp[0] for wp in self.apollo_listener.routing_wps if wp[0]]
+        waypoints = [wp[0] for wp in self.apollo_routing_wps if wp[0]]
         self.env = Env(self.world, self.bounds, obstacles, self.carla_map,
                        waypoints, self.resolution, safety_distance=1.5)
 
     def initialize_planner(self):
         """Initialize the DStar planner."""
         ego_location = self.ego_vehicle.get_location()
-        ego_grid = (int(ego_location.x / self.resolution), int(ego_location.y / self.resolution))
-        target_location = self.apollo_listener.routing_wps[-1][-1].transform.location
+        ego_grid = (int(ego_location.x / self.resolution),
+                    int(ego_location.y / self.resolution))
+        target_location = self.apollo_routing_wps[-1][-1].transform.location
         target_grid = self.to_grid(target_location)
 
-        self.planner = DStar(s_start=ego_grid, s_goal=target_grid, env=self.env)
+        self.planner = DStar(
+            s_start=ego_grid, s_goal=target_grid, env=self.env)
         self.planner.init()
 
     def perform_planning(self):
@@ -118,20 +124,23 @@ class VehicleNavigation:
         for grid_point in planned_path:
             world_x = grid_point[0] * self.resolution
             world_y = grid_point[1] * self.resolution
-            waypoint = self.carla_map.get_waypoint(carla.Location(x=world_x, y=world_y, z=0.0))
+            waypoint = self.carla_map.get_waypoint(
+                carla.Location(x=world_x, y=world_y, z=0.0))
             if waypoint:
                 carla_navigation_path.append(waypoint)
             else:
-                print(f"[WARNING] No valid waypoint found for grid point {grid_point}")
+                print(
+                    f"[WARNING] No valid waypoint found for grid point {grid_point}")
         return carla_navigation_path
 
     def save_visualization(self, planned_path, filename):
         """Save the grid visualization."""
         safe_grid = self.env.safe_grid_lane.union(self.env.safe_grid_obs)
         save_grid(self.ego_vehicle, self.env.lane_grid, self.env.obs,
-                  self.to_grid(self.apollo_listener.routing_wps[-1][-1].transform.location),
+                  self.to_grid(
+                      self.apollo_routing_wps[-1][-1].transform.location),
                   planned_path, self.carla_map, self.bounds, self.resolution, safe_grid, filename=filename)
-        print(f"[INFO] Grid visualization saved to {filename}")
+        # print(f"[INFO] Grid visualization saved to {filename}")
 
     def to_grid(self, location):
         """Convert a location to grid coordinates."""
@@ -172,9 +181,9 @@ def main():
     max_retries = 5
     retry_interval = 2  # seconds
     ego_vehicle = None
-
     for attempt in range(max_retries):
-        print(f"[INFO] Attempting to find ego vehicle (Attempt {attempt + 1}/{max_retries})...")
+        print(
+            f"[INFO] Attempting to find ego vehicle (Attempt {attempt + 1}/{max_retries})...")
         for vehicle in world.get_actors().filter('vehicle.*'):
             if "vehicle.lincoln.mkz_2017" in vehicle.type_id:
                 ego_vehicle = vehicle
@@ -183,7 +192,8 @@ def main():
         if ego_vehicle:
             break
         else:
-            print(f"[WARNING] Ego vehicle not found. Retrying in {retry_interval} seconds...")
+            print(
+                f"[WARNING] Ego vehicle not found. Retrying in {retry_interval} seconds...")
             time.sleep(retry_interval)
 
     if not ego_vehicle:
@@ -191,14 +201,15 @@ def main():
         return
 
     # Initialize Apollo Routing Listener
-    apollo_listener = ApolloRoutingListener(carla_world=world, ego_vehicle=ego_vehicle, debug=True)
+    apollo_listener = ApolloRoutingListener(
+        carla_world=world, ego_vehicle=ego_vehicle, debug=True)
     apollo_listener.start("routing_test_node")
     print("Waiting for routing response...")
     while not apollo_listener.routing_wps:
         time.sleep(0.5)
     print("Routing response received. Starting visualization loop...")
     # Create an instance of VehicleNavigation
-    vehicle_navigation = VehicleNavigation(world, apollo_listener, carla_map)
+    vehicle_navigation = VehicleNavigation(world, apollo_listener.routing_wps, carla_map)
 
     try:
         # Plan a path using VehicleNavigation
@@ -206,11 +217,13 @@ def main():
         # waypoints in planned_path
         planned_path = vehicle_navigation.perform_planning()
         # save the pic in grid_visualization_{int(time.time())}.png
-        vehicle_navigation.save_visualization(planned_path, f"grid_visualization_{int(time.time())}.png")
+        vehicle_navigation.save_visualization(
+            planned_path, f"grid_visualization_{int(time.time())}.png")
 
         # Test if the planned path was successfully generated
         if planned_path:
-            print(f"[INFO] Path successfully generated with {len(planned_path)} waypoints.")
+            print(
+                f"[INFO] Path successfully generated with {len(planned_path)} waypoints.")
         else:
             print("[ERROR] Failed to generate a valid path.")
         sys.exit(0)
