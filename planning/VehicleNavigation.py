@@ -1,5 +1,5 @@
 import carla
-from planning.Env import Env
+from Env import Env
 from planning.DStar import save_grid, DStar
 from ms_utils.apollo_routing_listener import ApolloRoutingListener
 import os
@@ -155,20 +155,14 @@ class VehicleNavigation:
         self.initialize_environment()
         self.initialize_planner()
 
-        is_path_found = self.perform_planning()
-        if is_path_found:
-            print(f"[INFO] Path found at iteration {time.time()}.")
-        else:
-            print("[INFO] No path found in this iteration.")
 
-        # Get navigation path and save visualization
-        navigation_path = self.get_navigation_path()
-        return navigation_path
-
+def handle_exit_signal(signal, frame):
+    print("\n[INFO] Exiting program due to signal interrupt (Ctrl+C)...")
+    sys.exit(0)
 
 def main():
-    # Initialize Carla client and world
     from cyber.python.cyber_py3 import cyber
+    # Initialize Carla client and world
     client = carla.Client('localhost', 4000)
     client.set_timeout(10.0)
     world = client.get_world()
@@ -208,6 +202,7 @@ def main():
     while not apollo_listener.routing_wps:
         time.sleep(0.5)
     print("Routing response received. Starting visualization loop...")
+
     # Create an instance of VehicleNavigation
     vehicle_navigation = VehicleNavigation(world, apollo_listener.routing_wps, carla_map)
 
@@ -226,17 +221,17 @@ def main():
                 f"[INFO] Path successfully generated with {len(planned_path)} waypoints.")
         else:
             print("[ERROR] Failed to generate a valid path.")
-        sys.exit(0)
 
     except KeyboardInterrupt:
         print("[INFO] Stopping main loop due to user interruption.")
         sys.exit(0)
-
     except Exception as e:
         print(f"[ERROR] Exception occurred during main loop: {e}")
         traceback.print_exc()
         sys.exit(1)
-
+    apollo_listener.stop()
 
 if __name__ == "__main__":
+    # Register signal handler for graceful shutdown (Ctrl+C)
+    signal.signal(signal.SIGINT, handle_exit_signal)
     main()

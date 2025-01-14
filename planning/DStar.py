@@ -394,124 +394,120 @@ def main():
 
     print("Routing response received. Starting visualization loop...")
 
-    try:
-        while True:
+    # try:
+    #     while True:
             # Check if ego vehicle still exists
-            if ego_vehicle is None or ego_vehicle not in world.get_actors():
-                print("[WARNING] Ego vehicle is missing. Attempting to reacquire...")
-                ego_vehicle = None
-                for vehicle in world.get_actors().filter('vehicle.*'):
-                    if "vehicle.lincoln.mkz_2017" in vehicle.type_id:
-                        ego_vehicle = vehicle
-                        print("[INFO] Ego vehicle reacquired.")
-                        break
-                if ego_vehicle is None:
-                    print("[ERROR] Ego vehicle could not be reacquired. Exiting loop.")
-                    break
+    if ego_vehicle is None or ego_vehicle not in world.get_actors():
+        print("[WARNING] Ego vehicle is missing. Attempting to reacquire...")
+        ego_vehicle = None
+        for vehicle in world.get_actors().filter('vehicle.*'):
+            if "vehicle.lincoln.mkz_2017" in vehicle.type_id:
+                ego_vehicle = vehicle
+                print("[INFO] Ego vehicle reacquired.")
+        if ego_vehicle is None:
+            print("[ERROR] Ego vehicle could not be reacquired. Exiting loop.")
 
-            # Get Ego vehicle location
-            ego_location = ego_vehicle.get_location()
-            ego_grid = (int(ego_location.x / resolution), int(ego_location.y / resolution))
+    # Get Ego vehicle location
+    ego_location = ego_vehicle.get_location()
+    ego_grid = (int(ego_location.x / resolution), int(ego_location.y / resolution))
 
-            # Update obstacles
-            obstacles = set()  # Ensure obstacles are a set for quick lookup
-            obstacle_grids = set()  # To store obstacle grid coordinates
+    # Update obstacles
+    obstacles = set()  # Ensure obstacles are a set for quick lookup
+    obstacle_grids = set()  # To store obstacle grid coordinates
 
-            for actor in world.get_actors():
-                if "vehicle" in actor.type_id and actor.id != ego_vehicle.id:
-                    obstacles.add(actor)
-                    # Convert obstacle location to grid coordinates
-                    obstacle_location = actor.get_location()
-                    obstacle_grid = to_grid(obstacle_location, resolution)
-                    obstacle_grids.add(obstacle_grid)
+    for actor in world.get_actors():
+        if "vehicle" in actor.type_id and actor.id != ego_vehicle.id:
+            obstacles.add(actor)
+            # Convert obstacle location to grid coordinates
+            obstacle_location = actor.get_location()
+            obstacle_grid = to_grid(obstacle_location, resolution)
+            obstacle_grids.add(obstacle_grid)
 
-            # Update routing waypoints
-            routing_waypoints = apollo_listener.routing_wps
-            if routing_waypoints:
-                waypoints = [wp[0] for wp in routing_waypoints if wp[0]]
-                target_waypoint = routing_waypoints[-1][-1]
-                target_location = target_waypoint.transform.location
-                target_grid = to_grid(target_location, resolution)  # Convert target location to grid coordinates
+    # Update routing waypoints
+    routing_waypoints = apollo_listener.routing_wps
+    if routing_waypoints:
+        waypoints = [wp[0] for wp in routing_waypoints if wp[0]]
+        target_waypoint = routing_waypoints[-1][-1]
+        target_location = target_waypoint.transform.location
+        target_grid = to_grid(target_location, resolution)  # Convert target location to grid coordinates
 
-                # Calculate bounds to cover all waypoints and obstacles in grid coordinates
-                grid_waypoints = [to_grid(wp.transform.location, resolution) for wp in waypoints]
+        # Calculate bounds to cover all waypoints and obstacles in grid coordinates
+        grid_waypoints = [to_grid(wp.transform.location, resolution) for wp in waypoints]
 
-                # Collect all grid coordinates from waypoints and obstacles
-                all_grids = grid_waypoints + list(obstacle_grids) + [target_grid]
-                x_min = min(wp[0] for wp in all_grids)
-                y_min = min(wp[1] for wp in all_grids)
-                x_max = max(wp[0] for wp in all_grids)
-                y_max = max(wp[1] for wp in all_grids)
+        # Collect all grid coordinates from waypoints and obstacles
+        all_grids = grid_waypoints + list(obstacle_grids) + [target_grid]
+        x_min = min(wp[0] for wp in all_grids)
+        y_min = min(wp[1] for wp in all_grids)
+        x_max = max(wp[0] for wp in all_grids)
+        y_max = max(wp[1] for wp in all_grids)
 
-                # Add a buffer to the bounds for safety
-                buffer = int(100 / resolution)  # Convert buffer to grid units
-                x_min -= buffer
-                y_min -= buffer
-                x_max += buffer
-                y_max += buffer
-            else:
-                print("[ERROR] No valid routing waypoints available. Exiting loop.")
-                break
+        # Add a buffer to the bounds for safety
+        buffer = int(100 / resolution)  # Convert buffer to grid units
+        x_min -= buffer
+        y_min -= buffer
+        x_max += buffer
+        y_max += buffer
+    else:
+        print("[ERROR] No valid routing waypoints available. Exiting loop.")
 
-            # Set bounds around ego vehicle in grid coordinates
-            bounds = (x_min, y_min, x_max, y_max)
-            print(f"[INFO] Bounds set to {bounds}")
+    # Set bounds around ego vehicle in grid coordinates
+    bounds = (x_min, y_min, x_max, y_max)
+    print(f"[INFO] Bounds set to {bounds}")
 
-            # Initialize environment with updated obstacles
-            env = Env(world, bounds, obstacles, carla_map, waypoints, resolution=resolution,
-                      safety_distance=1.5)
+    # Initialize environment with updated obstacles
+    env = Env(world, bounds, obstacles, carla_map, waypoints, resolution=resolution,
+              safety_distance=1.5)
 
-            # Initialize DStar planner
-            planner = DStar(s_start=ego_grid, s_goal=target_grid, env=env)
+    # Initialize DStar planner
+    planner = DStar(s_start=ego_grid, s_goal=target_grid, env=env)
 
-            # Perform planning
-            planner.init()
-            is_path_found = planner.run()
+    # Perform planning
+    planner.init()
+    is_path_found = planner.run()
 
-            # Save grid visualization
-            planned_path = planner.path  # Extract the planned path
-            carla_navigation_path = []
-            for grid_point in planned_path:
-                world_x = grid_point[0] * resolution
-                world_y = grid_point[1] * resolution
-                waypoint = carla_map.get_waypoint(carla.Location(x=world_x, y=world_y, z=0.0))
-                if waypoint:
-                    carla_navigation_path.append(waypoint)
-                else:
-                    print(f"[WARNING] No valid waypoint found for grid point {grid_point}")
+    # Save grid visualization
+    planned_path = planner.path  # Extract the planned path
+    carla_navigation_path = []
+    for grid_point in planned_path:
+        world_x = grid_point[0] * resolution
+        world_y = grid_point[1] * resolution
+        waypoint = carla_map.get_waypoint(carla.Location(x=world_x, y=world_y, z=0.0))
+        if waypoint:
+            carla_navigation_path.append(waypoint)
+        else:
+            print(f"[WARNING] No valid waypoint found for grid point {grid_point}")
 
-            # Check if a valid path was generated
-            if carla_navigation_path:
-                print(f"[INFO] Navigation path with {len(carla_navigation_path)} waypoints generated.")
-            else:
-                print("[INFO] No valid navigation path could be generated.")
-            filename = f"grid_visualization_{int(time.time())}.png"
-            safe_grid = env.safe_grid_lane.union(env.safe_grid_obs)
-            save_grid(ego_vehicle, env.lane_grid, env.obs, target_grid, planned_path, carla_map, bounds,
-                      resolution=resolution,
-                      safe_grid=safe_grid, filename=filename)
-            print(f"[INFO] Grid visualization saved to {filename}")
+    # Check if a valid path was generated
+    if carla_navigation_path:
+        print(f"[INFO] Navigation path with {len(carla_navigation_path)} waypoints generated.")
+    else:
+        print("[INFO] No valid navigation path could be generated.")
+    filename = f"grid_visualization_{int(time.time())}.png"
+    safe_grid = env.safe_grid_lane.union(env.safe_grid_obs)
+    save_grid(ego_vehicle, env.lane_grid, env.obs, target_grid, planned_path, carla_map, bounds,
+              resolution=resolution,
+              safe_grid=safe_grid, filename=filename)
+    print(f"[INFO] Grid visualization saved to {filename}")
 
-            if is_path_found:
-                print(f"[INFO] Path found at iteration {time.time()}.")
-            else:
-                print("[INFO] No path found in this iteration.")
+    if is_path_found:
+        print(f"[INFO] Path found at iteration {time.time()}.")
+    else:
+        print("[INFO] No path found in this iteration.")
+    apollo_listener.stop()
+    print("[INFO] Exiting main function.")
 
-            # Wait before the next update
-            time.sleep(1)
+    # Wait before the next update
+    # time.sleep(1)
 
-    except KeyboardInterrupt:
-        print("[INFO] Stopping main loop due to user interruption.")
-        sys.exit(0)
+    # except KeyboardInterrupt:
+    #     print("[INFO] Stopping main loop due to user interruption.")
+    #     sys.exit(0)
+    #
+    # except Exception as e:
+    #     print(f"[ERROR] Exception occurred during main loop: {e}")
+    #     traceback.print_exc()
+    #     sys.exit(1)
 
-    except Exception as e:
-        print(f"[ERROR] Exception occurred during main loop: {e}")
-        traceback.print_exc()
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()
 
 if __name__ == "__main__":
     try:

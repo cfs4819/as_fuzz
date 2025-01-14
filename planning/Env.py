@@ -178,7 +178,6 @@ class Env:
                 break
             # Add the lane to the grid
             self.add_lane_cells(lane)
-            print(f"[INFO] Added lane {lane.lane_id} to the {direction}.")
 
 
 def bounding_box_to_grid(obstacle, resolution):
