@@ -128,7 +128,7 @@ class CEGA:
         with open(path, 'w') as f:
             json.dump(result_dic, f, indent=4)
 
-    def prase_road_type(self, type_str: str):
+    def prase_road_type(self, type_str: str, traffic_density_coefficient=1):
         self.type_str = type_str
         str_seg = type_str.split('_')
 
@@ -143,7 +143,7 @@ class CEGA:
                 self.ind_vehicle_max_count = 3
                 self.ind_walker_max_count = 4
             elif self.junction_size == 'medium':
-                self.ind_vehicle_max_count = 4 
+                self.ind_vehicle_max_count = 4
                 self.ind_walker_max_count = 5
             elif self.junction_size == 'large':
                 self.ind_vehicle_max_count = 5
@@ -156,6 +156,11 @@ class CEGA:
             self.lane_num = int(str_seg[3]) if str_seg[3] != '-1' else 2
 
             self.ind_vehicle_max_count = 1.5 * self.lane_num
+
+        self.ind_vehicle_max_count = self.ind_vehicle_max_count * \
+            traffic_density_coefficient
+        self.ind_walker_max_count = self.ind_walker_max_count * \
+            traffic_density_coefficient
 
     def mate_walkers(self, ind1: GeneNpcWalkerList, ind2: GeneNpcWalkerList):
         offspring1 = GeneNpcWalkerList(max_count=self.ind_walker_max_count)

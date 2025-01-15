@@ -17,20 +17,12 @@ class Config:
     """
 
     def __init__(self):
-        self.score_dir = None
-        self.rosbag_dir = None
-        self.cam_dir = None
-        self.trace_dir = None
-        self.meta_file = None
-        self.error_dir = None
-        self.queue_dir = None
         self.debug = True
 
         # simulator config
         self.sim_host = '172.17.0.1'
         self.sim_port = 4000
         self.load_world_timeout = 10
-        self.frame_rate = 10
 
         self.carla_map = "Town10hd"
         # self.carla_map = "Town04"
@@ -64,16 +56,11 @@ class Config:
         # Fuzzer config
         self.scenario_length = 30
         self.scenario_width = 30
-        self.topo_k = 2
-        self.immobile_percentage = 0  # the percentage of the actors is immobile forever
-        self.max_cycles = 0
-        self.max_mutation = 0
-        self.num_dry_runs = 1
-        self.density = 1
-        self.num_mutation_car = 1
-        self.density = 1
         self.no_traffic_lights = False
         self.try_relese_block = True
+        
+        # GA config        
+        self.density = 1
 
         # Fuzzing metadata
         self.town = None
@@ -84,8 +71,6 @@ class Config:
             "7": "Town07",
             "10": "Town10hd",
         }
-        self.cur_time = None
-        self.determ_seed = None
         self.out_dir = '/apollo/data/MS_fuzz/result'
         self.seed_dir = None
 
@@ -102,25 +87,4 @@ class Config:
             "other": True,
         }
 
-        # Functional testing
-        self.function = "general"
 
-    def set_paths(self):
-        self.queue_dir = os.path.join(self.out_dir, "queue")
-        self.error_dir = os.path.join(self.out_dir, "errors")
-        self.meta_file = os.path.join(self.out_dir, "meta")
-        self.cam_dir = os.path.join(self.out_dir, "camera")
-        self.trace_dir = os.path.join(self.out_dir, "trace")
-        self.rosbag_dir = os.path.join(self.out_dir, "rosbags")
-
-    # def enqueue_seed_scenarios(self):
-    #     try:
-    #         seed_scenarios = os.listdir(self.seed_dir)
-    #     except:
-    #         print("[-] Error - cannot find seed directory ({})".format(self.seed_dir))
-    #         sys.exit(-1)
-    #
-    #     queue = [seed for seed in seed_scenarios if not seed.startswith(".")
-    #              and seed.endswith(".json")]
-    #
-    #     return queue

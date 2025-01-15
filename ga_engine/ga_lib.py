@@ -8,7 +8,7 @@ from typing import Dict, List
 from multiprocessing import Process, Queue
 from MS_fuzz.common.evaluate import Evaluate_Object, Evaluate_Transfer
 from MS_fuzz.ga_engine.cega import CEGA
-
+from MS_fuzz.fuzz_config.Config import Config
 
 class GA_LIB():
     def __init__(self,
@@ -17,7 +17,8 @@ class GA_LIB():
                  eva_req_queue: Queue,
                  eva_res_queue: Queue,
                  logger,
-                 ga_lib_floder_path=None):
+                 ga_lib_floder_path=None,
+                 cfg:Config=None):
 
         self.ga_lib: Dict[str, CEGA] = {}
 
@@ -25,6 +26,7 @@ class GA_LIB():
         self.scenario_width = scenario_width
         self.ga_lib_floder_path = ga_lib_floder_path
         self.logger = logger
+        self.cfg = cfg
 
         self.close_event = threading.Event()
 
@@ -72,7 +74,11 @@ class GA_LIB():
                 cega = CEGA(self.scenario_length,
                             self.scenario_width, logger=self.logger)
                 cega.type_str = type_str
-                cega.prase_road_type(type_str)
+                density = 1
+                if self.cfg:
+                    density = self.cfg.density
+                cega.prase_road_type(type_str,
+                                     traffic_density_coefficient=density)
                 cega_his_dir = os.path.join(
                     self.ga_lib_floder_path, f'gen_his_{cega.type_str}')
                 cega.set_generation_file(cega_his_dir)
