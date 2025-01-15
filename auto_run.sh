@@ -18,7 +18,7 @@ echo "Executing for $hours hours"
 echo "Executing for $hours hours" >> $log_file
 
 start_carla_script="$APOLLO_PATH/modules/MS_fuzz/run_carla_offscreen.sh"
-run_cmd='cd /apollo/modules/MS_fuzz/ && python msfuzz.py --town 4'
+run_cmd='cd /apollo/modules/MS_fuzz/ && python msfuzz.py --town 10 -p 5000'
 
 while [ $(date +%s) -lt $end_time ]; do
   if docker ps | grep -q $carla_container_name; then
