@@ -1,32 +1,13 @@
 import collections
 import math
 import random
-import sys
 import time
 from typing import List, Dict, Set, Tuple
 
-
-def set_carla_api_path():
-    # print('carla 0914 neednot be installed in this version ')
-    # return
-    try:
-        api_path = "../PythonAPI/carla/dist/carla-0.9.14-py3.7-linux-x86_64.egg"
-    except IndexError:
-        print("Couldn't set Carla API path.")
-        exit(-1)
-
-    if api_path not in sys.path:
-        sys.path.append(api_path)
-        print(f"API: {api_path}")
-
-
-set_carla_api_path()
 import carla
 
-import math
 
-
-def _calculate_relative_position_and_distance(ego_vehicle, other_vehicle):
+def _calculate_relative_position_and_distance(ego_vehicle: carla.Vehicle, other_vehicle: carla.Vehicle):
     """
     Calculates the relative position and distance between the ego vehicle and another vehicle.
 
@@ -60,10 +41,12 @@ def is_vehicle_in_front(ego_vehicle, other_vehicle, distance_threshold=30.0) -> 
     :param distance_threshold: Max distance to consider the vehicle as 'in front'.
     :return: True if the other vehicle is in front, False otherwise.
     """
-    relative_position, distance, forward_vector = _calculate_relative_position_and_distance(ego_vehicle, other_vehicle)
+    relative_position, distance, forward_vector = _calculate_relative_position_and_distance(
+        ego_vehicle, other_vehicle)
 
     # Compute the dot product of relative position and ego vehicle's forward vector
-    dot_product = forward_vector.x * relative_position.x + forward_vector.y * relative_position.y
+    dot_product = forward_vector.x * relative_position.x + \
+        forward_vector.y * relative_position.y
 
     # Check if the other vehicle is within the distance threshold and in front
     return dot_product > 0 and distance <= distance_threshold
@@ -78,7 +61,8 @@ def is_vehicle_around(ego_vehicle, other_vehicle, distance_threshold=5.0) -> boo
     :param distance_threshold: Max distance to consider the vehicle as 'around'.
     :return: True if the other vehicle is around, False otherwise.
     """
-    _, distance, _ = _calculate_relative_position_and_distance(ego_vehicle, other_vehicle)
+    _, distance, _ = _calculate_relative_position_and_distance(
+        ego_vehicle, other_vehicle)
 
     # Check if the other vehicle is within the distance threshold
     return distance <= distance_threshold
@@ -106,13 +90,53 @@ def calculate_distance(v1, v2):
     for vertex1 in vertices1:
         for vertex2 in vertices2:
             distance = math.sqrt(
-                (vertex1.x - vertex2.x) ** 2 +
-                (vertex1.y - vertex2.y) ** 2 +
-                (vertex1.z - vertex2.z) ** 2
+                (vertex1.x - vertex2.x) ** 2
+                + (vertex1.y - vertex2.y) ** 2
+                + (vertex1.z - vertex2.z) ** 2
             )
             min_distance = min(min_distance, distance)
 
     return min_distance
+
+
+def get_block_head_vehicle(ego_vehicle: carla.Vehicle,
+                           block_vehicles: List[carla.Vehicle],
+                           max_iterations: int = 10) -> carla.Vehicle:
+    """
+    Finds the head vehicle that is blocking the ego vehicle in a queue of block vehicles.
+
+    :param ego_vehicle: The ego vehicle actor.
+    :param block_vehicles: List of blocking vehicles to evaluate (can include None).
+    :param max_iterations: Maximum number of iterations to prevent infinite loop (default: 10).
+    :return: The head vehicle blocking the ego vehicle, or None if no such vehicle is found.
+    """
+    # Filter out None objects from block_vehicles
+    block_vehicles = [
+        vehicle for vehicle in block_vehicles if vehicle is not None]
+
+    # Initialize the current vehicle as the ego vehicle
+    current_vehicle = ego_vehicle
+
+    for _ in range(max_iterations):  # Limit the number of iterations
+        # Filter the vehicles that are in front of the current vehicle
+        front_vehicles = [
+            vehicle for vehicle in block_vehicles
+            if vehicle.id != current_vehicle.id and is_vehicle_in_front(current_vehicle, vehicle)
+        ]
+
+        if not front_vehicles:
+            # If no vehicles are found in front, the current vehicle is the head
+            return current_vehicle if current_vehicle != ego_vehicle else None
+
+        # Find the closest vehicle in front of the current vehicle
+        current_vehicle = min(
+            front_vehicles,
+            key=lambda v: calculate_distance(current_vehicle, v)
+        )
+
+    # If the maximum number of iterations is reached, return None
+    print("[WARNING] Maximum iterations reached. Returning None.")
+    return None
 
 
 def is_vehicle_accelerating(vehicle: carla.Vehicle) -> bool:
@@ -134,7 +158,8 @@ def resolve_stuck_vehicles(vehicles: List[carla.Actor], condition_func, throttle
     :param duration: Duration to apply the throttle (in seconds, default: 3.0).
     """
     # Filter vehicles based on the condition
-    target_vehicles = [vehicle for vehicle in vehicles if condition_func(vehicle)]
+    target_vehicles = [
+        vehicle for vehicle in vehicles if condition_func(vehicle)]
 
     if not target_vehicles:
         return
@@ -142,13 +167,17 @@ def resolve_stuck_vehicles(vehicles: List[carla.Actor], condition_func, throttle
     # Randomly choose one vehicle from the filtered list
     vehicle_to_resolve = random.choice(target_vehicles)
 
-    print(f"[ACTION] Resolving stuck vehicle: Vehicle ID {vehicle_to_resolve.id}")
-    vehicle_to_resolve.apply_control(carla.VehicleControl(throttle=throttle, brake=0.0))
+    print(
+        f"[ACTION] Resolving stuck vehicle: Vehicle ID {vehicle_to_resolve.id}")
+    vehicle_to_resolve.apply_control(
+        carla.VehicleControl(throttle=throttle, brake=0.0))
 
     time.sleep(duration)
 
-    print(f"[ACTION] Resetting control for vehicle ID: {vehicle_to_resolve.id}")
-    vehicle_to_resolve.apply_control(carla.VehicleControl(throttle=0.0, brake=0.0))
+    print(
+        f"[ACTION] Resetting control for vehicle ID: {vehicle_to_resolve.id}")
+    vehicle_to_resolve.apply_control(
+        carla.VehicleControl(throttle=0.0, brake=0.0))
 
 
 class RoadBlockageChecker:
@@ -175,7 +204,8 @@ class RoadBlockageChecker:
         occupied_lanes = set()
 
         for vertex in bbox_vertices:
-            waypoint = self.carla_map.get_waypoint(vertex, project_to_road=True, lane_type=carla.LaneType.Driving)
+            waypoint = self.carla_map.get_waypoint(
+                vertex, project_to_road=True, lane_type=carla.LaneType.Driving)
             if waypoint:
                 occupied_lanes.add((waypoint.road_id, waypoint.lane_id))
 
@@ -329,7 +359,8 @@ class RoadBlockageChecker:
             lane_clusters_on_road = self.get_all_lane_clusters(road_vehicles)
 
             # Generate vehicle clusters (vehicles can be in multiple clusters)
-            vehicle_clusters = self.get_vehicle_clusters(road_vehicles, distance_threshold)
+            vehicle_clusters = self.get_vehicle_clusters(
+                road_vehicles, distance_threshold)
 
             # Check each lane cluster for blockage
             for lane_cluster in lane_clusters_on_road:
@@ -337,13 +368,15 @@ class RoadBlockageChecker:
                     # Collect all lanes occupied by vehicles in this cluster
                     vehicle_lanes = set()
                     for vehicle in vehicle_cluster:
-                        vehicle_lanes.update(self.get_vehicle_lane_occupation(vehicle))
+                        vehicle_lanes.update(
+                            self.get_vehicle_lane_occupation(vehicle))
 
                     # Check if the vehicle cluster fully blocks the lane cluster
                     if lane_cluster.issubset(vehicle_lanes):
                         result["blocked"] = True
                         result["blocked_road_id"] = road_id
-                        result["vehicles_on_blocked_road"] = list(vehicle_cluster)
+                        result["vehicles_on_blocked_road"] = list(
+                            vehicle_cluster)
                         return result
 
         return result
@@ -355,7 +388,7 @@ class RoadBlockageChecker:
 
         def condition(vehicle):
             # The Vehicle is in front of ego and not speeding up
-            return is_vehicle_in_front(ego_vehicle,vehicle) and vehicle.get_velocity().length() < 1.0
+            return is_vehicle_in_front(ego_vehicle, vehicle) and vehicle.get_velocity().length() < 1.0
 
         resolve_stuck_vehicles(slow_vehicles, condition, throttle, duration)
 
@@ -375,7 +408,8 @@ if __name__ == '__main__':
         print(vehicle.type_id)
         if "vehicle.lincoln.mkz_2017" in vehicle.type_id:
             ego_vehicle = vehicle
-            print(f"[INFO] Ego vehicle (Lincoln MKZ) found with ID: {ego_vehicle.id}")
+            print(
+                f"[INFO] Ego vehicle (Lincoln MKZ) found with ID: {ego_vehicle.id}")
             break
 
     if not ego_vehicle:
@@ -391,8 +425,8 @@ if __name__ == '__main__':
             # Retrieve background vehicles with speed < 0.5
             slow_vehicles = [
                 actor for actor in world.get_actors()
-                if "vehicle" in actor.type_id and
-                   actor.get_velocity().length() < 0.5
+                if "vehicle" in actor.type_id
+                   and actor.get_velocity().length() < 0.5
             ]
             if ego_vehicle in slow_vehicles:
                 slow_vehicles.remove(ego_vehicle)
@@ -401,9 +435,11 @@ if __name__ == '__main__':
             for slow_vehicle in slow_vehicles:
                 print(slow_vehicle.id)
             print("[INFO] Checking for road blockage...")
-            blockage_result = checker.is_road_blocked(slow_vehicles, distance_threshold=distance_threshold)
+            blockage_result = checker.is_road_blocked(
+                slow_vehicles, distance_threshold=distance_threshold)
             if blockage_result:
-                checker.solve_blockage(slow_vehicles, ego_vehicle, throttle=1.0, duration=3.0)
+                checker.solve_blockage(
+                    slow_vehicles, ego_vehicle, throttle=1.0, duration=3.0)
 
             # # Resolve vehicles stuck at intersections
             # resolve_intersection_stuck(slow_vehicles, throttle=0.5, duration=3.0)

@@ -2,9 +2,6 @@ import math
 import os
 import pdb
 import sys
-import random
-import time
-import signal
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -13,22 +10,6 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.abspath(os.path.join(current_dir, '..'))
 sys.path.insert(0, parent_dir)
 from ms_utils.apollo_routing_listener import ApolloRoutingListener
-
-# def set_carla_api_path():
-#     # print('carla 0914 neednot be installed in this version ')
-#     # return
-#     try:
-#         api_path = "../PythonAPI/carla/dist/carla-0.9.14-py3.7-linux-x86_64.egg"
-#     except IndexError:
-#         print("Couldn't set Carla API path.")
-#         exit(-1)
-#
-#     if api_path not in sys.path:
-#         sys.path.append(api_path)
-#         print(f"API: {api_path}")
-#
-#
-# set_carla_api_path()
 
 import carla
 
