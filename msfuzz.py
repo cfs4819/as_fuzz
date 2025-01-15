@@ -20,8 +20,10 @@ from MS_fuzz.ga_engine.ga_lib import GA_LIB
 
 def set_args():
     argument_parser = argparse.ArgumentParser()
-    argument_parser.add_argument("-o", "--out-dir", default="/apollo/data/MS_fuzz/result", type=str,
+    argument_parser.add_argument("-o", "--out-dir", default="/apollo/data/AS_fuzz/result", type=str,
                                  help="Directory to save fuzzing logs")
+    argument_parser.add_argument("--ga-dir", default="/apollo/data/AS_fuzz/ga_lib", type=str,
+                                 help="Directory to save GALib progress files")
     # argument_parser.add_argument("-m", "--max-mutations", default=5, type=int,
     #                              help="Size of the mutated population per cycle")
     argument_parser.add_argument("-u", "--sim-host", default="172.17.0.1", type=str,
@@ -55,7 +57,7 @@ class MS_FUZZ(object):
 
         self.sim_stop_queue = multiprocessing.Queue()
 
-        self.ga_path = '/apollo/data/MS_fuzz/ga_lib'
+        self.ga_path = args.ga_dir
         if not os.path.exists(self.ga_path):
             os.makedirs(self.ga_path)
 

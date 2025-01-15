@@ -545,19 +545,20 @@ class Simulator(object):
                                                self.scene_segmentation.routing_listener.routing_wps,
                                                self.carla_map)
         planned_path_his = []
-        for i in range(5):
+        for i in range(3):
+            logger.info(f'[Check Road Block] Try {i}')
             vehicle_navigation.run()
             # waypoints in planned_path
             planned_path = vehicle_navigation.perform_planning()
             planned_path_his.append(planned_path)
             # save the pic in grid_visualization_{int(time.time())}.png
             visualization_file_path = os.path.join(self.result_path,
-                                                planned_path)
+                                                f"grid_visualization_{int(time.time())}.png")
 
             vehicle_navigation.save_visualization(planned_path,
-                                                f"grid_visualization_{int(time.time())}.png")
+                                                visualization_file_path)
             logger.info(
-                f"[INFO] Save visualization to {visualization_file_path}")
+                f"[Check Road Block] Save visualization to {visualization_file_path}")
         for plan in planned_path_his:
             if plan:
                 return False

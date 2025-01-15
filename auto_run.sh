@@ -1,5 +1,5 @@
 #!/bin/bash
-APOLLO_PATH=$(dirname "$(dirname "$(pwd)")"
+APOLLO_PATH=$(dirname "$(dirname "$(pwd)")")
 
 if [ -z "$1" ]; then
   echo "Usage: $0 <hours>"
@@ -11,7 +11,7 @@ end_time=$(($(date +%s) + hours * 3600))
 apollo_container_name="apollo_dev_$USER"
 carla_container_name="carla-$USER"
 
-log_file="command_execution_log.txt"
+log_file="autorun_results/command_execution_log.txt"
 echo "Command execution log - $(date)"
 echo "Command execution log - $(date)" > $log_file
 echo "Executing for $hours hours" 
