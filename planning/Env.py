@@ -7,12 +7,10 @@ import time
 import signal
 
 import numpy as np
-import matplotlib.pyplot as plt
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.abspath(os.path.join(current_dir, '..'))
 sys.path.insert(0, parent_dir)
-from ms_utils.apollo_routing_listener import ApolloRoutingListener
 
 # def set_carla_api_path():
 #     # print('carla 0914 neednot be installed in this version ')

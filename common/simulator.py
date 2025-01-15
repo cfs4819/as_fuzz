@@ -507,13 +507,13 @@ class Simulator(object):
                 self.on_unsafe_lock = False
                 return
             self.stuck_trigger_times += 1
-            if self.next_local_scenario != None:
-                # try start next scenario
-                logger.info('Stucked, try start next scenario')
-                if not self.next_local_scenario.running:
-                    self.next_local_scenario.scenario_start()
-                    self.on_unsafe_lock = False
-                    return
+            # if self.next_local_scenario != None:
+            #     # try start next scenario
+            #     logger.info('Stucked, try start next scenario')
+            #     if not self.next_local_scenario.running:
+            #         self.next_local_scenario.scenario_start()
+            #         self.on_unsafe_lock = False
+            #         return
             logger.info(f'[Unsafe Detected]: {message}')
             self.result_saver.result_to_save['unsafe'] = True
             logger.info(f"Analyzing stucked reason")
@@ -533,28 +533,29 @@ class Simulator(object):
         return
 
     def check_road_block_stuck(self):
-        road_block_stuck = True
         vehicle_navigation = VehicleNavigation(self.carla_world,
+                                                  self.ego_vehicle,
                                                self.scene_segmentation.routing_listener.routing_wps,
                                                self.carla_map)
-        try:
-            # Plan a path using VehicleNavigation
-            vehicle_navigation.run()
-            # waypoints in planned_path
-            planned_path = vehicle_navigation.perform_planning()
-            # save the pic in grid_visualization_{int(time.time())}.png
-            visualization_file_path = os.path.join(self.result_path,
-                                                   f"grid_visualization_{int(time.time())}.png")
+        # try:
+        # Plan a path using VehicleNavigation
+        vehicle_navigation.run()
+        # waypoints in planned_path
+        planned_path = vehicle_navigation.perform_planning()
 
-            vehicle_navigation.save_visualization(planned_path,
-                                                  visualization_file_path)
-            logger.info(
-                f"[INFO] Save visualization to {visualization_file_path}")
-            road_block_stuck = False if planned_path else True
-        except Exception as e:
-            logger.error(
-                f"[ERROR] Exception occurred during check_block_stuck: {e}")
-            return False
+        # save the pic in grid_visualization_{int(time.time())}.png
+        visualization_file_path = os.path.join(self.result_path,
+                                               f"grid_visualization_{int(time.time())}.png")
+
+        vehicle_navigation.save_visualization(planned_path,
+                                              f"grid_visualization_{int(time.time())}.png")
+        logger.info(
+            f"[INFO] Save visualization to {visualization_file_path}")
+        road_block_stuck = False if planned_path else True
+        # except Exception as e:
+        #     logger.error(
+        #         f"[ERROR] Exception occurred during check_block_stuck: {e}")
+        #     return False
         return road_block_stuck
 
     def start_record(self, id=None):

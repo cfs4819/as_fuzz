@@ -3,19 +3,15 @@ RTAAstar 2D (Real-time Adaptive A*)
 Modified for Carla Simulator Integration
 """
 
-import math
-import heapq
-import pdb
 import signal
 import sys
 import time
 import traceback
 import carla
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.patches import Polygon
-from matplotlib.lines import Line2D
-from matplotlib.patches import Patch
+import plotly.graph_objects as go
+
+import math
 
 from planning.Env import Env, to_grid, to_carla, generate_lane_edges
 from ms_utils.apollo_routing_listener import ApolloRoutingListener
@@ -72,7 +68,6 @@ class DStar:
             # If start node is closed, the path is found
             if self.t[self.s_start] == 'CLOSED':
                 break
-
         # Extract path from start to goal
         self.path = self.extract_path(self.s_start, self.s_goal)
         return self.path
@@ -188,6 +183,178 @@ def path_to_waypoints(path, resolution, carla_map):
     return waypoints
 
 
+def save_grid_plotly(carla_map, ego_vehicle, lane_grid, obs, target_grid, path, bounds, resolution, safe_grid=None,
+                     filename="grid_visualization.png"):
+    """
+    Save grid visualization to a file with the planned path, in real-world coordinates using Plotly.
+    :param carla_map: Carla map object to fetch waypoints.
+    :param ego_vehicle: Ego vehicle object.
+    :param lane_grid: Set of grid points representing the lane grid.
+    :param obs: Set of obstacle grid cells.
+    :param target_grid: Tuple representing the target's grid position.
+    :param path: List of grid cells representing the planned path.
+    :param resolution: Resolution to adjust the path points.
+    :param bounds: Bounds of the area to visualize (x_min, y_min, x_max, y_max).
+    :param safe_grid: Set of safe grid cells (optional).
+    :param filename: Filename to save the visualization.
+    """
+
+    # Convert grid coordinates to physical coordinates
+    def to_physical(grid_point):
+        """Convert a grid point to real-world coordinates."""
+        return grid_point[0] * resolution, grid_point[1] * resolution
+        # Extract bounds
+
+    x_min, y_min, x_max, y_max = bounds
+
+    # Generate waypoints from Carla map
+    print("[INFO] Generating waypoints from Carla map...")
+    waypoints = carla_map.generate_waypoints(distance=resolution)
+
+    # Filter waypoints within bounds
+    bounded_waypoints = [
+        wp for wp in waypoints
+        if x_min <= wp.transform.location.x <= x_max and y_min <= wp.transform.location.y <= y_max
+    ]
+
+    # Use `generate_lane_edges` to compute lane edges for all bounded waypoints
+    left_edge_points, right_edge_points = generate_lane_edges(bounded_waypoints)
+
+    # Separate x and y coordinates for left and right edges
+    left_edge_x = [-point.x for point in left_edge_points]  # Flip X-axis
+    left_edge_y = [point.y for point in left_edge_points]
+
+    right_edge_x = [-point.x for point in right_edge_points]  # Flip X-axis
+    right_edge_y = [point.y for point in right_edge_points]
+
+    edge_x = left_edge_x + right_edge_x
+    edge_y = left_edge_y + right_edge_y
+
+    # Initialize figure
+    fig = go.Figure()
+
+    # Draw lane edges in real-world coordinates
+    fig.add_trace(go.Scatter(
+        x=edge_x,
+        y=edge_y,
+        mode='markers',
+        marker=dict(color='grey', size=resolution*2),
+        name="Lane Edge"
+    ))
+
+
+
+    # Draw lane grids in real-world coordinates
+    if lane_grid:
+        lane_points = np.array([to_physical(cell) for cell in lane_grid])
+        fig.add_trace(go.Scatter(
+            x=-lane_points[:, 0],
+            y=lane_points[:, 1],
+            mode='markers',
+            marker=dict(color='green', size=4),
+            name="Lane"
+        ))
+
+    # Draw safe grids in real-world coordinates
+    if safe_grid:
+        safe_points = np.array([to_physical(cell) for cell in safe_grid])
+        fig.add_trace(go.Scatter(
+            x=-safe_points[:, 0],
+            y=safe_points[:, 1],
+            mode='markers',
+            marker=dict(color='cyan', size=4),
+            name="Safe Grid"
+        ))
+
+    # Draw obstacle grids in real-world coordinates
+    if obs:
+        obstacle_points = np.array([to_physical(cell) for cell in obs])
+        fig.add_trace(go.Scatter(
+            x=-obstacle_points[:, 0],
+            y=obstacle_points[:, 1],
+            mode='markers',
+            marker=dict(color='red', size=4),
+            name="Obstacle"
+        ))
+
+    # Draw the target point
+    target_x, target_y = to_physical(target_grid)
+    fig.add_trace(go.Scatter(
+        x=[-target_x],
+        y=[target_y],
+        mode='markers',
+        marker=dict(color='orange', size=10),
+        name="Target Point"
+    ))
+
+    # Draw the planned path
+    if path:
+        path_points = np.array([to_physical(p) for p in path])
+        fig.add_trace(go.Scatter(
+            x=-path_points[:, 0],
+            y=path_points[:, 1],
+            mode='lines',
+            line=dict(color='blue', width=2),
+            name="Planned Path"
+        ))
+
+    # Draw the ego vehicle as a triangle
+    ego_location = ego_vehicle.get_location()
+    ego_x, ego_y = ego_location.x, ego_location.y
+    ego_yaw = math.radians(ego_vehicle.get_transform().rotation.yaw)
+
+    triangle_size = 2.0  # Size of the triangle
+    half_width = triangle_size / 2.0
+
+    # Compute the vertices of the triangle
+    front_x = ego_x + triangle_size * math.cos(ego_yaw)
+    front_y = ego_y + triangle_size * math.sin(ego_yaw)
+    rear_left_x = ego_x - half_width * math.cos(ego_yaw) - half_width * math.sin(ego_yaw)
+    rear_left_y = ego_y - half_width * math.sin(ego_yaw) + half_width * math.cos(ego_yaw)
+    rear_right_x = ego_x - half_width * math.cos(ego_yaw) + half_width * math.sin(ego_yaw)
+    rear_right_y = ego_y - half_width * math.sin(ego_yaw) - half_width * math.cos(ego_yaw)
+
+    # Add the three edges of the triangle
+    fig.add_trace(go.Scatter(
+        x=[-front_x, -rear_left_x],
+        y=[front_y, rear_left_y],
+        mode='lines',
+        line=dict(color='purple', width=2),
+        name="Ego Vehicle",
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=[-rear_left_x, -rear_right_x],
+        y=[rear_left_y, rear_right_y],
+        mode='lines',
+        line=dict(color='purple', width=2),
+        showlegend=False
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=[-rear_right_x, -front_x],
+        y=[rear_right_y, front_y],
+        mode='lines',
+        line=dict(color='purple', width=2),
+        showlegend=False
+    ))
+
+    # Set axis labels and layout
+    fig.update_layout(
+        title="Grid Visualization in Real-World Coordinates",
+        xaxis_title="X (meters)",
+        yaxis_title="Y (meters)",
+        xaxis=dict(scaleanchor="y", scaleratio=1),
+        yaxis=dict(scaleanchor="x", scaleratio=1),
+        showlegend=True,
+        width=800,
+        height=800
+    )
+
+    # Save the figure as a static image
+    fig.write_image(filename)
+
+
 def save_grid(ego_vehicle, lane_grid, obs, target_grid, path, carla_map, bounds, resolution, safe_grid=None,
               filename="grid_visualization.png"):
     """
@@ -203,10 +370,10 @@ def save_grid(ego_vehicle, lane_grid, obs, target_grid, path, carla_map, bounds,
     :param safe_grid: Set of safe grid cells (optional).
     :param filename: Filename to save the visualization.
     """
+    import matplotlib
+    matplotlib.use('Agg')
     import matplotlib.pyplot as plt
-    from matplotlib.patches import Polygon
-    from matplotlib.lines import Line2D
-    import math
+    matplotlib.use('Agg')
 
     plt.figure(figsize=(10, 10))
     plt.grid(True)
@@ -223,8 +390,8 @@ def save_grid(ego_vehicle, lane_grid, obs, target_grid, path, carla_map, bounds,
 
     # Extract bounds
     x_min, y_min, x_max, y_max = bounds
-
     # Generate waypoints from Carla map
+    print("[INFO] Generating waypoints from Carla map...")
     waypoints = carla_map.generate_waypoints(distance=resolution)
 
     # Filter waypoints within bounds
@@ -246,7 +413,7 @@ def save_grid(ego_vehicle, lane_grid, obs, target_grid, path, carla_map, bounds,
     # Plot the left and right lane edges
     plt.scatter(left_edge_x, left_edge_y, c='grey', s=2, label="Lane Edge", zorder=0)
     plt.scatter(right_edge_x, right_edge_y, c='grey', s=2, label=None, zorder=0)
-
+    print("[INFO] Lane edges plotted.")
     # Draw lane grids in real-world coordinates (second bottom layer)
     lane_points = np.array([to_physical(cell) for cell in lane_grid if to_physical(cell) != (None, None)])
     if lane_points.size > 0:
@@ -327,7 +494,9 @@ def save_grid(ego_vehicle, lane_grid, obs, target_grid, path, carla_map, bounds,
     plt.xlabel("X (meters)")
     plt.ylabel("Y (meters)")
     plt.title("Grid Visualization in Real-World Coordinates (X-axis Flipped)")
+
     plt.savefig(filename)
+    print(f"[INFO] Grid visualization saved to {filename}")
     plt.close()
 
 
@@ -396,7 +565,7 @@ def main():
 
     # try:
     #     while True:
-            # Check if ego vehicle still exists
+    # Check if ego vehicle still exists
     if ego_vehicle is None or ego_vehicle not in world.get_actors():
         print("[WARNING] Ego vehicle is missing. Attempting to reacquire...")
         ego_vehicle = None

@@ -1,6 +1,6 @@
 import carla
-from Env import Env
-from planning.DStar import save_grid, DStar
+from planning.Env import Env
+from planning.DStar import save_grid_plotly, DStar
 from ms_utils.apollo_routing_listener import ApolloRoutingListener
 import os
 import signal
@@ -14,19 +14,19 @@ sys.path.append(parent_directory)
 
 
 class VehicleNavigation:
-    def __init__(self, world, apollo_routing_wps, carla_map):
+    def __init__(self, world,ego_vehicle, apollo_routing_wps, carla_map):
         self.world = world
         self.apollo_routing_wps = apollo_routing_wps
         self.carla_map = carla_map
         self.resolution = 0.5
-        self.ego_vehicle = None
+        self.ego_vehicle = ego_vehicle
         self.bounds = None
         self.env = None
         self.planner = None
 
     def reacquire_ego_vehicle(self):
         """Reacquire the ego vehicle if missing."""
-        if self.ego_vehicle is None or self.ego_vehicle not in self.world.get_actors():
+        if self.ego_vehicle is None:
             print("[WARNING] Ego vehicle is missing. Attempting to reacquire...")
             self.ego_vehicle = None
             for vehicle in self.world.get_actors().filter('vehicle.*'):
@@ -136,10 +136,14 @@ class VehicleNavigation:
     def save_visualization(self, planned_path, filename):
         """Save the grid visualization."""
         safe_grid = self.env.safe_grid_lane.union(self.env.safe_grid_obs)
-        save_grid(self.ego_vehicle, self.env.lane_grid, self.env.obs,
-                  self.to_grid(
-                      self.apollo_routing_wps[-1][-1].transform.location),
-                  planned_path, self.carla_map, self.bounds, self.resolution, safe_grid, filename=filename)
+        # save_grid(self.ego_vehicle, self.env.lane_grid, self.env.obs,
+        #           self.to_grid(
+        #               self.apollo_routing_wps[-1][-1].transform.location),
+        #           planned_path, self.carla_map, self.bounds, self.resolution, safe_grid, filename=filename)
+        save_grid_plotly(self.carla_map,self.ego_vehicle, self.env.lane_grid, self.env.obs,
+                         self.to_grid(
+                             self.apollo_routing_wps[-1][-1].transform.location),
+                         planned_path, self.bounds, self.resolution, safe_grid, filename=filename)
         # print(f"[INFO] Grid visualization saved to {filename}")
 
     def to_grid(self, location):
@@ -204,7 +208,7 @@ def main():
     print("Routing response received. Starting visualization loop...")
 
     # Create an instance of VehicleNavigation
-    vehicle_navigation = VehicleNavigation(world, apollo_listener.routing_wps, carla_map)
+    vehicle_navigation = VehicleNavigation(world, ego_vehicle,apollo_listener.routing_wps, carla_map)
 
     try:
         # Plan a path using VehicleNavigation

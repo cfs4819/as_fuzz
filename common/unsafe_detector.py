@@ -35,7 +35,7 @@ class UnsafeDetector(object):
         self.world = world
         self.vehicle = vehicle
         self.try_relese_block = try_relese_block
-        
+
         self.map = self.world.get_map()
         self.lane_change_detector = None
         self.collision_detector = None
@@ -51,7 +51,7 @@ class UnsafeDetector(object):
 
         self.active_timers = {}
         self.timers_lock = Lock()
-        self.threshold_time = 5.0
+        self.threshold_time = 2.0
 
         self.stuck_event = Event()
         self.stuck_thread = None
