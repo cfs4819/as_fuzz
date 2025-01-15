@@ -350,6 +350,26 @@ def save_grid_plotly(carla_map, ego_vehicle, lane_grid, obs, target_grid, path, 
         width=800,
         height=800
     )
+    fig.update_layout(
+        xaxis=dict(
+            title="X (meters)",
+            showgrid=False,
+            zeroline=False,
+            showline=True,
+            linecolor='black',
+            linewidth=1
+        ),
+        yaxis=dict(
+            title="Y (meters)",
+            showgrid=False,
+            zeroline=False,
+            showline=True,
+            linecolor='black',
+            linewidth=1
+        ),
+        plot_bgcolor='white',
+        paper_bgcolor='white'
+    )
 
     # Save the figure as a static image
     fig.write_image(filename)
