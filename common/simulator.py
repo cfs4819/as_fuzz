@@ -560,8 +560,8 @@ class Simulator(object):
                 f"[INFO] Save visualization to {visualization_file_path}")
         for plan in planned_path_his:
             if plan:
-                return True
-        return False
+                return False
+        return True
 
     def start_record(self, id=None):
         self.result_saver.clear_result()
