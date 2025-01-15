@@ -367,8 +367,8 @@ def save_grid_plotly(carla_map, ego_vehicle, lane_grid, obs, target_grid, path, 
             linecolor='black',
             linewidth=1
         ),
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)'
+        # plot_bgcolor='rgba(0,0,0,0)',
+        # paper_bgcolor='rgba(0,0,0,0)'
     )
 
     # Save the figure as a static image

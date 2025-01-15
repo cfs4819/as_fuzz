@@ -541,29 +541,27 @@ class Simulator(object):
 
     def check_road_block_stuck(self):
         vehicle_navigation = VehicleNavigation(self.carla_world,
-                                                  self.ego_vehicle,
+                                               self.ego_vehicle,
                                                self.scene_segmentation.routing_listener.routing_wps,
                                                self.carla_map)
-        # try:
-        # Plan a path using VehicleNavigation
-        vehicle_navigation.run()
-        # waypoints in planned_path
-        planned_path = vehicle_navigation.perform_planning()
+        planned_path_his = []
+        for i in range(5):
+            vehicle_navigation.run()
+            # waypoints in planned_path
+            planned_path = vehicle_navigation.perform_planning()
+            planned_path_his.append(planned_path)
+            # save the pic in grid_visualization_{int(time.time())}.png
+            visualization_file_path = os.path.join(self.result_path,
+                                                planned_path)
 
-        # save the pic in grid_visualization_{int(time.time())}.png
-        visualization_file_path = os.path.join(self.result_path,
-                                               f"grid_visualization_{int(time.time())}.png")
-
-        vehicle_navigation.save_visualization(planned_path,
-                                              f"grid_visualization_{int(time.time())}.png")
-        logger.info(
-            f"[INFO] Save visualization to {visualization_file_path}")
-        road_block_stuck = False if planned_path else True
-        # except Exception as e:
-        #     logger.error(
-        #         f"[ERROR] Exception occurred during check_block_stuck: {e}")
-        #     return False
-        return road_block_stuck
+            vehicle_navigation.save_visualization(planned_path,
+                                                f"grid_visualization_{int(time.time())}.png")
+            logger.info(
+                f"[INFO] Save visualization to {visualization_file_path}")
+        for plan in planned_path_his:
+            if plan:
+                return True
+        return False
 
     def start_record(self, id=None):
         self.result_saver.clear_result()
