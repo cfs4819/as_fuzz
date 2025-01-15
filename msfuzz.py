@@ -30,6 +30,8 @@ def set_args():
                                  help="RPC port of Carla simulation server")
     argument_parser.add_argument("--town", default=10, type=int,
                                  help="Test on a specific town (e.g., '--town 3' forces Town03)")
+    argument_parser.add_argument("-d","--traffic-density", default=1, type=int,
+                                 help="Traffic density of the simulation. Avaliable only when results/ga_lib is empty")
     argument_parser.add_argument("-ntrb", "--not-trying-release-block", action="store_true",
                                  help="Disable releasing road blockage, only log the blockage time")
     return argument_parser
@@ -46,6 +48,7 @@ class MS_FUZZ(object):
         self.conf.sim_host = args.sim_host
         self.conf.out_dir = args.out_dir
         self.conf.try_relese_block = not args.not_trying_release_block
+        self.conf.density = args.traffic_density
         
         self.eva_req_queue = multiprocessing.Queue()
         self.eva_res_queue = multiprocessing.Queue()

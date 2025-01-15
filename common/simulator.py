@@ -27,9 +27,7 @@ from MS_fuzz.common.unsafe_detector import UNSAFE_TYPE, UnsafeDetector
 from MS_fuzz.common.evaluate import Evaluate_Object, Evaluate_Transfer
 from MS_fuzz.ga_engine.scene_segmentation import SceneSegment
 from MS_fuzz.common.result_saver import ResultSaver
-from MS_fuzz.planning.is_stuck import RoadBlockageChecker
-from MS_fuzz.planning.is_stuck import is_vehicle_in_front
-from MS_fuzz.planning.is_stuck import is_vehicle_around
+from MS_fuzz.planning.is_stuck import RoadBlockageChecker, is_vehicle_in_front, get_block_head_vehicle, is_vehicle_around
 from MS_fuzz.planning.VehicleNavigation import VehicleNavigation
 
 
@@ -386,11 +384,16 @@ class Simulator(object):
         target_vehicles = [
             vehicle for vehicle in vehicles if condition_func(vehicle)]
         if not target_vehicles:
-            logger.info("[ACTION] No stuck vehicles found")
+            logger.info("[ACTION] No block vehicles found")
             return False
 
-        # Randomly choose one vehicle from the filtered list
-        vehicle_to_resolve = random.choice(target_vehicles)
+        vehicle_to_resolve = get_block_head_vehicle(self.ego_vehicle,
+                                                    target_vehicles)
+        if not vehicle_to_resolve:
+            logger.info(
+                "[ACTION] No block head vehicle found, select a random one")
+            # Randomly choose one vehicle from the filtered list
+            vehicle_to_resolve = random.choice(target_vehicles)
         logger.info(
             f"[ACTION] Resolving stuck vehicle: Vehicle ID {vehicle_to_resolve.id}")
 
@@ -470,9 +473,13 @@ class Simulator(object):
             blocked_vehicles = data  # [carla.Vehicle]
 
             def condition_func(vehicle):
-                return (is_vehicle_in_front(self.ego_vehicle, vehicle) or is_vehicle_around(self.ego_vehicle, vehicle)) and vehicle.get_velocity().length() < 1.0
-            handle_result = self.resolve_blockage(
-                blocked_vehicles, condition_func)
+                return (is_vehicle_in_front(self.ego_vehicle,
+                                            vehicle)
+                        or is_vehicle_around(self.ego_vehicle,
+                                             vehicle)) and \
+                    vehicle.get_velocity().length() < 1.0
+            handle_result = self.resolve_blockage(blocked_vehicles,
+                                                  condition_func)
             self.on_unsafe_lock = False
             return handle_result
 
