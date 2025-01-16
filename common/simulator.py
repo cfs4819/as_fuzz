@@ -514,22 +514,21 @@ class Simulator(object):
                 self.on_unsafe_lock = False
                 return
             self.stuck_trigger_times += 1
-            # if self.next_local_scenario != None:
-            #     # try start next scenario
-            #     logger.info('Stucked, try start next scenario')
-            #     if not self.next_local_scenario.running:
-            #         self.next_local_scenario.scenario_start()
-            #         self.on_unsafe_lock = False
-            #         return
+            if not self.cfgs.try_relese_block and self.next_local_scenario != None:
+                # try start next scenario
+                logger.info('Stucked, try start next scenario')
+                if not self.next_local_scenario.running:
+                    self.next_local_scenario.scenario_start()
+                    self.on_unsafe_lock = False
+                    return
             logger.info(f'[Unsafe Detected]: {message}')
             self.result_saver.result_to_save['unsafe'] = True
+            self.result_saver.result_to_save['unsafe_type'] = UNSAFE_TYPE.type_str[type]
+            self.stop_record_and_save(save_video=True)
             logger.info(f"Analyzing stucked reason")
             if self.check_road_block_stuck():
                 self.result_saver.result_to_save['unsafe_type'] = UNSAFE_TYPE.type_str[UNSAFE_TYPE.ROAD_BLOCKED]
-            else:
-                self.result_saver.result_to_save['unsafe_type'] = UNSAFE_TYPE.type_str[type]
             logger.info('reload')
-            self.stop_record_and_save(save_video=True)
             if self.curr_local_scenario is not None:
                 if self.curr_local_scenario.running:
                     eva_result = self.curr_local_scenario.scenario_end()
@@ -540,29 +539,83 @@ class Simulator(object):
         return
 
     def check_road_block_stuck(self):
-        vehicle_navigation = VehicleNavigation(self.carla_world,
-                                               self.ego_vehicle,
-                                               self.scene_segmentation.routing_listener.routing_wps,
-                                               self.carla_map)
-        planned_path_his = []
-        for i in range(3):
-            logger.info(f'[Check Road Block] Try {i}')
+        def process_navigation(i, result_queue):
+            """Thread processing logic"""
+            vehicle_navigation = VehicleNavigation(self.carla_world,
+                                                   self.ego_vehicle,
+                                                   self.scene_segmentation.routing_listener.routing_wps,
+                                                   self.carla_map)
+            logger.info(f'[Check Road Block] Start navigation process {i}')
             vehicle_navigation.run()
-            # waypoints in planned_path
-            planned_path = vehicle_navigation.perform_planning()
-            planned_path_his.append(planned_path)
-            # save the pic in grid_visualization_{int(time.time())}.png
-            visualization_file_path = os.path.join(self.result_path,
-                                                f"grid_visualization_{int(time.time())}.png")
-
-            vehicle_navigation.save_visualization(planned_path,
-                                                visualization_file_path)
             logger.info(
-                f"[Check Road Block] Save visualization to {visualization_file_path}")
-        for plan in planned_path_his:
-            if plan:
-                return False
-        return True
+                f'[Check Road Block] Navigation process {i} initialized')
+            planned_path = vehicle_navigation.perform_planning()
+            logger.info(f'[Check Road Block] Navigation process {i} planning completed')
+            # Save visualization image
+            visualization_file_path = os.path.join(self.result_path,
+                                                   f"grid_visualization_{int(time.time())}.png")
+            vehicle_navigation.save_visualization(
+                planned_path, visualization_file_path)
+            logger.info(
+                f"[Check Road Block] Saved visualization {i} to {visualization_file_path}")
+
+            # Put the result into the queue
+            result_queue.put(planned_path)
+
+        # Create a thread-safe queue
+        result_queue = queue.Queue()
+        threads = []
+
+        # Create and start threads
+        for i in range(3):
+            thread = threading.Thread(
+                target=process_navigation, args=(i, result_queue,))
+            threads.append(thread)
+            thread.start()
+            time.sleep(1)
+
+        # Wait for all threads to finish
+        for thread in threads:
+            thread.join()
+
+        check_road_block_result_path = os.path.join(
+            self.result_path, f"check_road_block_result_{int(time.time())}.json")
+        
+        check_result = True
+        while not result_queue.empty():
+            if result_queue.get():
+                check_result = False
+                break
+        with open(check_road_block_result_path, 'w') as f:
+            f.write(f'{"check_result": {check_result}}')
+        
+        # Check results in the queue
+        
+        return check_result
+    # def check_road_block_stuck(self):
+    #     vehicle_navigation = VehicleNavigation(self.carla_world,
+    #                                            self.ego_vehicle,
+    #                                            self.scene_segmentation.routing_listener.routing_wps,
+    #                                            self.carla_map)
+    #     planned_path_his = []
+    #     for i in range(3):
+    #         logger.info(f'[Check Road Block] Try {i}')
+    #         vehicle_navigation.run()
+    #         # waypoints in planned_path
+    #         planned_path = vehicle_navigation.perform_planning()
+    #         planned_path_his.append(planned_path)
+    #         # save the pic in grid_visualization_{int(time.time())}.png
+    #         visualization_file_path = os.path.join(self.result_path,
+    #                                             f"grid_visualization_{int(time.time())}.png")
+
+    #         vehicle_navigation.save_visualization(planned_path,
+    #                                             visualization_file_path)
+    #         logger.info(
+    #             f"[Check Road Block] Save visualization to {visualization_file_path}")
+    #     for plan in planned_path_his:
+    #         if plan:
+    #             return False
+    #     return True
 
     def start_record(self, id=None):
         self.result_saver.clear_result()
@@ -656,14 +709,21 @@ class Simulator(object):
 
     def handle_segs(self):
         self.carla_world.set_pedestrians_cross_factor(0.1)
-        logger.info('waitting until the vehicle reach the first segment')
+        logger.info('waiting until the vehicle reach the first segment')
         # wait until the vehicle reach first segment
+        waitting_first_seg_timeout = 120
+        start_waitting_first_seg_time = time.time()
         while self.scene_segmentation.curr_seg_index < 0:
             # logger.info('scene_segmentation.curr_seg_index: '
             #             + str(self.scene_segmentation.curr_seg_index))
             if self.close_event.is_set():
                 return
             self.carla_world.wait_for_tick()
+            if time.time() - start_waitting_first_seg_time > waitting_first_seg_timeout:
+                logger.error(
+                    'waiting for the vehicle to reach the first segment timeout.\n Startting another Simulation')
+                self.close()
+                break
         logger.info(
             f'scene_segmentation.curr_seg_index={self.scene_segmentation.curr_seg_index}')
 
