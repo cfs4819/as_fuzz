@@ -587,7 +587,7 @@ class Simulator(object):
                 check_result = False
                 break
         with open(check_road_block_result_path, 'w') as f:
-            f.write(f'{"check_result": {check_result}}')
+            f.write(f'{{"check_result": {check_result}}}')
         
         # Check results in the queue
         
